@@ -3,6 +3,7 @@ from openai import OpenAI, OpenAIError
 import time
 import httpx
 import os
+
 http_client = httpx.Client(verify=False)
 
 client = OpenAI(
@@ -26,7 +27,7 @@ def run_LLM(json_file):
     for data in datas:
         i=i+1
         if i % 5 == 0:
-            time.sleep(1)
+            time.sleep(1)  
         print("Entry {}".format(i))
         code=data['func']
         messages=[]
@@ -57,9 +58,9 @@ def run_LLM(json_file):
         data['predict']=response_content
 
    
-    with open("KGVD/BASE/result/CWE476/claude/function/base1.json", "w", encoding="utf-8") as f:
+    with open("KGVD/BASE/result/CWE119/claude/function/base1_primevul.json", "w", encoding="utf-8") as f:
         json.dump(datas, f, ensure_ascii=False, indent=4)
     print("Results saved to result.json")
 
 if __name__ == "__main__":
-    run_LLM("primevul_CWE-476.jsonl")
+    run_LLM("primevul_CWE-119.jsonl")

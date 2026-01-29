@@ -69,6 +69,7 @@ class Run():
         self.vul_total=0
         self.fix_total=0
         self.client = OpenAI(
+            base_url="",
         api_key=os.getenv("OPENAI_API_KEY", "your api key"),
         http_client=http_client,
         )
@@ -118,7 +119,6 @@ class Run():
                 '''
                 """
 
-                # Generate reasoning description
                 direct_desc = ", ".join(direct_list)
                 indirect_desc = ", ".join(indirect_list)
                 vul_types_desc = ", ".join(sorted(vul))
@@ -128,11 +128,7 @@ class Run():
                     reasoning = f"According to the knowledge graph, {key_variable} may directly trigger {direct_desc} vulnerabilities or other vulnerabilities since it appears in vulnerability-related lines."
                 elif direct_list and indirect_list:
                     reasoning = f"According to the knowledge graph, {key_variable} may directly trigger {direct_desc} vulnerabilities (appears in vulnerability-related lines) or indirectly trigger {indirect_desc} vulnerabilities by transforming other variables, or other vulnerabilities."
-                # else:
-                #     reasoning = f"According to the knowledge graph, {key_variable} may trigger other vulnerabilities."
                 
-
-                # Add final prompt content
                 vul_field = "None" if not vul_types_desc else f"None, {vul_types_desc}, others"
                 messages.append({
                     "role": "user",
@@ -188,7 +184,6 @@ class Run():
                                     fix1=set(fix1)
                                     FIX.append(fix1)
                             if FIX:
-                                # user_input=f"In your first response, you stated that {key_variable} triggers {R1['Vulnerability_types']}. Based on that answer, the knowledge graph suggests possible mitigations such as {', '.join(str(fix) for fix in FIX)}. Re-evaluate the code considering these potential fixes and reply only with True (if the vulnerability still exists) or False, without explanation."
                                 user_input=f"In your previous response, the variable {key_variable} will trigger {R1['Vulnerability_types']}. But the code might include mitigations such as {', '.join(str(fix) for fix in FIX)} or other security measures to address it. Re-evaluate and reply only with True (if a vulnerability exists) or False, without any further explanation."
                             else:
                                 self.fix_total+=1
@@ -227,18 +222,16 @@ class Run():
                 self.chat_with_pirate(messages)
                 print(messages[-1]['content'])
                 data['predict']=(messages[-1]['content'])
-        self.save_messages_to_json('/home/nfs/d2024-lhq/lhq/KGVD/result/CWE476/claude/function/KGVD2_primevul.json',datas)
+        self.save_messages_to_json('KGVD/result/CWE476/claude/function/KGVD2_primevul.json',datas)
         print(self.vul_total)   
         print(self.fix_total)
         
     def chat_with_pirate(self,messages):
-        #llama3
         response =self.client.chat.completions.create(
             model="claude-3-5-sonnet-20240620",
             messages=messages
         )
         response_content = response.choices[0].message.content
-        # Add the model's response to messages
         messages.append({"role": "assistant", "content": response_content})
 
 
