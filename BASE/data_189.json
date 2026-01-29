@@ -1,0 +1,1161 @@
+[
+  {
+    "patch_model": "Delete",
+    "change_type": "Var-Declaration",
+    "line_old": 950,
+    "critical_vars": [
+      "nsems"
+    ],
+    "function": "semctl_setval",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_sem.c.diff",
+    "label": "True",
+    "function_code": "\nstatic int semctl_setval(struct ipc_namespace *ns, int semid, int semnum,\n\t\tunsigned long arg)\n{\n\tstruct sem_undo *un;\n\tstruct sem_array *sma;\n\tstruct sem* curr;\n\tint err;\n\tint nsems;\n\tstruct list_head tasks;\n\tint val;\n#if defined(CONFIG_64BIT) && defined(__BIG_ENDIAN)\n\t/* big-endian 64bit */\n\tval = arg >> 32;\n#else\n\t/* 32bit or little-endian 64bit */\n\tval = arg;\n#endif\n\n\tsma = sem_lock_check(ns, semid);\n\tif (IS_ERR(sma))\n\t\treturn PTR_ERR(sma);\n\n\tINIT_LIST_HEAD(&tasks);\n\tnsems = sma->sem_nsems;\n\n\terr = -EACCES;\n\tif (ipcperms(ns, &sma->sem_perm, S_IWUGO))\n\t\tgoto out_unlock;\n\n\terr = security_sem_semctl(sma, SETVAL);\n\tif (err)\n\t\tgoto out_unlock;\n\n\terr = -EINVAL;\n\tif(semnum < 0 || semnum >= nsems)\n\t\tgoto out_unlock;\n\n\tcurr = &sma->sem_base[semnum];\n\n\terr = -ERANGE;\n\tif (val > SEMVMX || val < 0)\n\t\tgoto out_unlock;\n\n\tassert_spin_locked(&sma->sem_perm.lock);\n\tlist_for_each_entry(un, &sma->list_id, list_id)\n\t\tun->semadj[semnum] = 0;\n\n\tcurr->semval = val;\n\tcurr->sempid = task_tgid_vnr(current);\n\tsma->sem_ctime = get_seconds();\n\t/* maybe some queued-up processes were waiting for this */\n\tdo_smart_update(sma, NULL, 0, 0, &tasks);\n\terr = 0;\nout_unlock:\n\tsem_unlock(sma);\n\twake_up_sem_queue_do(&tasks);\n\treturn err;\n}",
+    "variable_definitions": {
+      "nsems": "int nsems;"
+    },
+    "variable_types": {
+      "nsems": "integer"
+    },
+    "type_mapping": {
+      "nsems": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 1031,
+    "critical_vars": [
+      "val"
+    ],
+    "function": "semctl_setval",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_sem.c.diff",
+    "label": "False",
+    "function_code": "\nstatic int semctl_setval(struct ipc_namespace *ns, int semid, int semnum,\n\t\tunsigned long arg)\n{\n\tstruct sem_undo *un;\n\tstruct sem_array *sma;\n\tstruct sem* curr;\n\tint err;\n\tstruct list_head tasks;\n\tint val;\n#if defined(CONFIG_64BIT) && defined(__BIG_ENDIAN)\n\t/* big-endian 64bit */\n\tval = arg >> 32;\n#else\n\t/* 32bit or little-endian 64bit */\n\tval = arg;\n#endif\n\n\tif (val > SEMVMX || val < 0)\n\t\treturn -ERANGE;\n\n\tINIT_LIST_HEAD(&tasks);\n\n\trcu_read_lock();\n\tsma = sem_obtain_object_check(ns, semid);\n\tif (IS_ERR(sma)) {\n\t\trcu_read_unlock();\n\t\treturn PTR_ERR(sma);\n\t}\n\n\tif (semnum < 0 || semnum >= sma->sem_nsems) {\n\t\trcu_read_unlock();\n\t\treturn -EINVAL;\n\t}\n\n\n\tif (ipcperms(ns, &sma->sem_perm, S_IWUGO)) {\n\t\trcu_read_unlock();\n\t\treturn -EACCES;\n\t}\n\n\terr = security_sem_semctl(sma, SETVAL);\n\tif (err) {\n\t\trcu_read_unlock();\n\t\treturn -EACCES;\n\t}\n\n\tsem_lock(sma, NULL, -1);\n\n\tcurr = &sma->sem_base[semnum];\n\n\tassert_spin_locked(&sma->sem_perm.lock);\n\tlist_for_each_entry(un, &sma->list_id, list_id)\n\t\tun->semadj[semnum] = 0;\n\n\tcurr->semval = val;\n\tcurr->sempid = task_tgid_vnr(current);\n\tsma->sem_ctime = get_seconds();\n\t/* maybe some queued-up processes were waiting for this */\n\tdo_smart_update(sma, NULL, 0, 0, &tasks);\n\tsem_unlock(sma, -1);\n\twake_up_sem_queue_do(&tasks);\n\treturn 0;\n}",
+    "variable_definitions": {
+      "val": "int val;"
+    },
+    "variable_types": {
+      "val": "integer"
+    },
+    "type_mapping": {
+      "val": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Var-Declaration",
+    "line_new": 1422,
+    "critical_vars": [
+      "error"
+    ],
+    "function": "*find_alloc_undo",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_sem.c.diff",
+    "label": "False",
+    "function_code": "static struct sem_undo *find_alloc_undo(struct ipc_namespace *ns, int semid)\n{\n\tstruct sem_array *sma;\n\tstruct sem_undo_list *ulp;\n\tstruct sem_undo *un, *new;\n\tint nsems, error;\n\n\terror = get_undo_list(&ulp);\n\tif (error)\n\t\treturn ERR_PTR(error);\n\n\trcu_read_lock();\n\tspin_lock(&ulp->lock);\n\tun = lookup_undo(ulp, semid);\n\tspin_unlock(&ulp->lock);\n\tif (likely(un!=NULL))\n\t\tgoto out;\n\n\t/* no undo structure around - allocate one. */\n\t/* step 1: figure out the size of the semaphore array */\n\tsma = sem_obtain_object_check(ns, semid);\n\tif (IS_ERR(sma)) {\n\t\trcu_read_unlock();\n\t\treturn ERR_CAST(sma);\n\t}\n\n\tnsems = sma->sem_nsems;\n\tif (!ipc_rcu_getref(sma)) {\n\t\trcu_read_unlock();\n\t\tun = ERR_PTR(-EIDRM);\n\t\tgoto out;\n\t}\n\trcu_read_unlock();\n\n\t/* step 2: allocate new undo structure */\n\tnew = kzalloc(sizeof(struct sem_undo) + sizeof(short)*nsems, GFP_KERNEL);\n\tif (!new) {\n\t\tsem_putref(sma);\n\t\treturn ERR_PTR(-ENOMEM);\n\t}\n\n\t/* step 3: Acquire the lock on semaphore array */\n\tsem_lock_and_putref(sma);\n\tif (sma->sem_perm.deleted) {\n\t\tsem_unlock(sma, -1);\n\t\tkfree(new);\n\t\tun = ERR_PTR(-EIDRM);\n\t\tgoto out;\n\t}\n\tspin_lock(&ulp->lock);\n\n\t/*\n\t * step 4: check for races: did someone else allocate the undo struct?\n\t */\n\tun = lookup_undo(ulp, semid);\n\tif (un) {\n\t\tkfree(new);\n\t\tgoto success;\n\t}\n\t/* step 5: initialize & link new undo structure */\n\tnew->semadj = (short *) &new[1];\n\tnew->ulp = ulp;\n\tnew->semid = semid;\n\tassert_spin_locked(&ulp->lock);\n\tlist_add_rcu(&new->list_proc, &ulp->list_proc);\n\tassert_spin_locked(&sma->sem_perm.lock);\n\tlist_add(&new->list_id, &sma->list_id);\n\tun = new;\n\nsuccess:\n\tspin_unlock(&ulp->lock);\n\trcu_read_lock();\n\tsem_unlock(sma, -1);\nout:\n\treturn un;\n}",
+    "variable_definitions": {
+      "error": "int nsems, error;"
+    },
+    "variable_types": {
+      "error": "integer"
+    },
+    "type_mapping": {
+      "error": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Var-Declaration",
+    "line_old": 1344,
+    "critical_vars": [
+      "error"
+    ],
+    "function": "*find_alloc_undo",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_sem.c.diff",
+    "label": "True",
+    "function_code": "static struct sem_undo *find_alloc_undo(struct ipc_namespace *ns, int semid)\n{\n\tstruct sem_array *sma;\n\tstruct sem_undo_list *ulp;\n\tstruct sem_undo *un, *new;\n\tint nsems;\n\tint error;\n\n\terror = get_undo_list(&ulp);\n\tif (error)\n\t\treturn ERR_PTR(error);\n\n\trcu_read_lock();\n\tspin_lock(&ulp->lock);\n\tun = lookup_undo(ulp, semid);\n\tspin_unlock(&ulp->lock);\n\tif (likely(un!=NULL))\n\t\tgoto out;\n\n\t/* no undo structure around - allocate one. */\n\t/* step 1: figure out the size of the semaphore array */\n\tsma = sem_obtain_object_check(ns, semid);\n\tif (IS_ERR(sma)) {\n\t\trcu_read_unlock();\n\t\treturn ERR_CAST(sma);\n\t}\n\n\tnsems = sma->sem_nsems;\n\tipc_rcu_getref(sma);\n\trcu_read_unlock();\n\n\t/* step 2: allocate new undo structure */\n\tnew = kzalloc(sizeof(struct sem_undo) + sizeof(short)*nsems, GFP_KERNEL);\n\tif (!new) {\n\t\tsem_putref(sma);\n\t\treturn ERR_PTR(-ENOMEM);\n\t}\n\n\t/* step 3: Acquire the lock on semaphore array */\n\tsem_lock_and_putref(sma);\n\tif (sma->sem_perm.deleted) {\n\t\tsem_unlock(sma);\n\t\tkfree(new);\n\t\tun = ERR_PTR(-EIDRM);\n\t\tgoto out;\n\t}\n\tspin_lock(&ulp->lock);\n\n\t/*\n\t * step 4: check for races: did someone else allocate the undo struct?\n\t */\n\tun = lookup_undo(ulp, semid);\n\tif (un) {\n\t\tkfree(new);\n\t\tgoto success;\n\t}\n\t/* step 5: initialize & link new undo structure */\n\tnew->semadj = (short *) &new[1];\n\tnew->ulp = ulp;\n\tnew->semid = semid;\n\tassert_spin_locked(&ulp->lock);\n\tlist_add_rcu(&new->list_proc, &ulp->list_proc);\n\tassert_spin_locked(&sma->sem_perm.lock);\n\tlist_add(&new->list_id, &sma->list_id);\n\tun = new;\n\nsuccess:\n\tspin_unlock(&ulp->lock);\n\trcu_read_lock();\n\tsem_unlock(sma);\nout:\n\treturn un;\n}",
+    "variable_definitions": {
+      "error": "int error;"
+    },
+    "variable_types": {
+      "error": "integer"
+    },
+    "type_mapping": {
+      "error": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Var-Declaration",
+    "line_new": 1788,
+    "critical_vars": [
+      "i"
+    ],
+    "function": "exit_sem",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_sem.c.diff",
+    "label": "False",
+    "function_code": "void exit_sem(struct task_struct *tsk)\n{\n\tstruct sem_undo_list *ulp;\n\n\tulp = tsk->sysvsem.undo_list;\n\tif (!ulp)\n\t\treturn;\n\ttsk->sysvsem.undo_list = NULL;\n\n\tif (!atomic_dec_and_test(&ulp->refcnt))\n\t\treturn;\n\n\tfor (;;) {\n\t\tstruct sem_array *sma;\n\t\tstruct sem_undo *un;\n\t\tstruct list_head tasks;\n\t\tint semid, i;\n\n\t\trcu_read_lock();\n\t\tun = list_entry_rcu(ulp->list_proc.next,\n\t\t\t\t    struct sem_undo, list_proc);\n\t\tif (&un->list_proc == &ulp->list_proc)\n\t\t\tsemid = -1;\n\t\t else\n\t\t\tsemid = un->semid;\n\n\t\tif (semid == -1) {\n\t\t\trcu_read_unlock();\n\t\t\tbreak;\n\t\t}\n\n\t\tsma = sem_obtain_object_check(tsk->nsproxy->ipc_ns, un->semid);\n\t\t/* exit_sem raced with IPC_RMID, nothing to do */\n\t\tif (IS_ERR(sma)) {\n\t\t\trcu_read_unlock();\n\t\t\tcontinue;\n\t\t}\n\n\t\tsem_lock(sma, NULL, -1);\n\t\tun = __lookup_undo(ulp, semid);\n\t\tif (un == NULL) {\n\t\t\t/* exit_sem raced with IPC_RMID+semget() that created\n\t\t\t * exactly the same semid. Nothing to do.\n\t\t\t */\n\t\t\tsem_unlock(sma, -1);\n\t\t\tcontinue;\n\t\t}\n\n\t\t/* remove un from the linked lists */\n\t\tassert_spin_locked(&sma->sem_perm.lock);\n\t\tlist_del(&un->list_id);\n\n\t\tspin_lock(&ulp->lock);\n\t\tlist_del_rcu(&un->list_proc);\n\t\tspin_unlock(&ulp->lock);\n\n\t\t/* perform adjustments registered in un */\n\t\tfor (i = 0; i < sma->sem_nsems; i++) {\n\t\t\tstruct sem * semaphore = &sma->sem_base[i];\n\t\t\tif (un->semadj[i]) {\n\t\t\t\tsemaphore->semval += un->semadj[i];\n\t\t\t\t/*\n\t\t\t\t * Range checks of the new semaphore value,\n\t\t\t\t * not defined by sus:\n\t\t\t\t * - Some unices ignore the undo entirely\n\t\t\t\t *   (e.g. HP UX 11i 11.22, Tru64 V5.1)\n\t\t\t\t * - some cap the value (e.g. FreeBSD caps\n\t\t\t\t *   at 0, but doesn't enforce SEMVMX)\n\t\t\t\t *\n\t\t\t\t * Linux caps the semaphore value, both at 0\n\t\t\t\t * and at SEMVMX.\n\t\t\t\t *\n\t\t\t\t * \tManfred <manfred@colorfullife.com>\n\t\t\t\t */\n\t\t\t\tif (semaphore->semval < 0)\n\t\t\t\t\tsemaphore->semval = 0;\n\t\t\t\tif (semaphore->semval > SEMVMX)\n\t\t\t\t\tsemaphore->semval = SEMVMX;\n\t\t\t\tsemaphore->sempid = task_tgid_vnr(current);\n\t\t\t}\n\t\t}\n\t\t/* maybe some queued-up processes were waiting for this */\n... (function end not found)",
+    "variable_definitions": {
+      "i": "int semid, i;"
+    },
+    "variable_types": {
+      "i": "integer"
+    },
+    "type_mapping": {
+      "i": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Var-Declaration",
+    "line_old": 1720,
+    "critical_vars": [
+      "i"
+    ],
+    "function": "exit_sem",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_sem.c.diff",
+    "label": "True",
+    "function_code": "void exit_sem(struct task_struct *tsk)\n{\n\tstruct sem_undo_list *ulp;\n\n\tulp = tsk->sysvsem.undo_list;\n\tif (!ulp)\n\t\treturn;\n\ttsk->sysvsem.undo_list = NULL;\n\n\tif (!atomic_dec_and_test(&ulp->refcnt))\n\t\treturn;\n\n\tfor (;;) {\n\t\tstruct sem_array *sma;\n\t\tstruct sem_undo *un;\n\t\tstruct list_head tasks;\n\t\tint semid;\n\t\tint i;\n\n\t\trcu_read_lock();\n\t\tun = list_entry_rcu(ulp->list_proc.next,\n\t\t\t\t    struct sem_undo, list_proc);\n\t\tif (&un->list_proc == &ulp->list_proc)\n\t\t\tsemid = -1;\n\t\t else\n\t\t\tsemid = un->semid;\n\t\trcu_read_unlock();\n\n\t\tif (semid == -1)\n\t\t\tbreak;\n\n\t\tsma = sem_lock_check(tsk->nsproxy->ipc_ns, un->semid);\n\n\t\t/* exit_sem raced with IPC_RMID, nothing to do */\n\t\tif (IS_ERR(sma))\n\t\t\tcontinue;\n\n\t\tun = __lookup_undo(ulp, semid);\n\t\tif (un == NULL) {\n\t\t\t/* exit_sem raced with IPC_RMID+semget() that created\n\t\t\t * exactly the same semid. Nothing to do.\n\t\t\t */\n\t\t\tsem_unlock(sma);\n\t\t\tcontinue;\n\t\t}\n\n\t\t/* remove un from the linked lists */\n\t\tassert_spin_locked(&sma->sem_perm.lock);\n\t\tlist_del(&un->list_id);\n\n\t\tspin_lock(&ulp->lock);\n\t\tlist_del_rcu(&un->list_proc);\n\t\tspin_unlock(&ulp->lock);\n\n\t\t/* perform adjustments registered in un */\n\t\tfor (i = 0; i < sma->sem_nsems; i++) {\n\t\t\tstruct sem * semaphore = &sma->sem_base[i];\n\t\t\tif (un->semadj[i]) {\n\t\t\t\tsemaphore->semval += un->semadj[i];\n\t\t\t\t/*\n\t\t\t\t * Range checks of the new semaphore value,\n\t\t\t\t * not defined by sus:\n\t\t\t\t * - Some unices ignore the undo entirely\n\t\t\t\t *   (e.g. HP UX 11i 11.22, Tru64 V5.1)\n\t\t\t\t * - some cap the value (e.g. FreeBSD caps\n\t\t\t\t *   at 0, but doesn't enforce SEMVMX)\n\t\t\t\t *\n\t\t\t\t * Linux caps the semaphore value, both at 0\n\t\t\t\t * and at SEMVMX.\n\t\t\t\t *\n\t\t\t\t * \tManfred <manfred@colorfullife.com>\n\t\t\t\t */\n\t\t\t\tif (semaphore->semval < 0)\n\t\t\t\t\tsemaphore->semval = 0;\n\t\t\t\tif (semaphore->semval > SEMVMX)\n\t\t\t\t\tsemaphore->semval = SEMVMX;\n\t\t\t\tsemaphore->sempid = task_tgid_vnr(current);\n\t\t\t}\n\t\t}\n\t\t/* maybe some queued-up processes were waiting for this */\n\t\tINIT_LIST_HEAD(&tasks);\n\t\tdo_smart_update(sma, NULL, 0, 1, &tasks\n... (function end not found)",
+    "variable_definitions": {
+      "i": "int i;"
+    },
+    "variable_types": {
+      "i": "integer"
+    },
+    "type_mapping": {
+      "i": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Fun-Call",
+    "line_old": 690,
+    "critical_vars": [
+      "msq"
+    ],
+    "function": "do_msgsnd",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_msg.c.diff",
+    "label": "True",
+    "function_code": "\nlong do_msgsnd(int msqid, long mtype, void __user *mtext,\n\t\tsize_t msgsz, int msgflg)\n{\n\tstruct msg_queue *msq;\n\tstruct msg_msg *msg;\n\tint err;\n\tstruct ipc_namespace *ns;\n\n\tns = current->nsproxy->ipc_ns;\n\n\tif (msgsz > ns->msg_ctlmax || (long) msgsz < 0 || msqid < 0)\n\t\treturn -EINVAL;\n\tif (mtype < 1)\n\t\treturn -EINVAL;\n\n\tmsg = load_msg(mtext, msgsz);\n\tif (IS_ERR(msg))\n\t\treturn PTR_ERR(msg);\n\n\tmsg->m_type = mtype;\n\tmsg->m_ts = msgsz;\n\n\tmsq = msg_lock_check(ns, msqid);\n\tif (IS_ERR(msq)) {\n\t\terr = PTR_ERR(msq);\n\t\tgoto out_free;\n\t}\n\n\tfor (;;) {\n\t\tstruct msg_sender s;\n\n\t\terr = -EACCES;\n\t\tif (ipcperms(ns, &msq->q_perm, S_IWUGO))\n\t\t\tgoto out_unlock_free;\n\n\t\terr = security_msg_queue_msgsnd(msq, msg, msgflg);\n\t\tif (err)\n\t\t\tgoto out_unlock_free;\n\n\t\tif (msgsz + msq->q_cbytes <= msq->q_qbytes &&\n\t\t\t\t1 + msq->q_qnum <= msq->q_qbytes) {\n\t\t\tbreak;\n\t\t}\n\n\t\t/* queue full, wait: */\n\t\tif (msgflg & IPC_NOWAIT) {\n\t\t\terr = -EAGAIN;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\t\tss_add(msq, &s);\n\t\tipc_rcu_getref(msq);\n\t\tmsg_unlock(msq);\n\t\tschedule();\n\n\t\tipc_lock_by_ptr(&msq->q_perm);\n\t\tipc_rcu_putref(msq);\n\t\tif (msq->q_perm.deleted) {\n\t\t\terr = -EIDRM;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\t\tss_del(&s);\n\n\t\tif (signal_pending(current)) {\n\t\t\terr = -ERESTARTNOHAND;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\t}\n\n\tmsq->q_lspid = task_tgid_vnr(current);\n\tmsq->q_stime = get_seconds();\n\n\tif (!pipelined_send(msq, msg)) {\n\t\t/* no one is waiting for this message, enqueue it */\n\t\tlist_add_tail(&msg->m_list, &msq->q_messages);\n\t\tmsq->q_cbytes += msgsz;\n\t\tmsq->q_qnum++;\n\t\tatomic_add(msgsz, &ns->msg_bytes);\n\t\tatomic_inc(&ns->msg_hdrs);\n\t}\n\n\terr = 0;\n\tmsg = NULL;\n\nout_unlock_free:\n\tmsg_unlock(msq);\nout_free:\n\tif (msg != NULL)\n\t\tfree_msg(msg);\n\treturn err;\n}",
+    "variable_definitions": {
+      "msq": "struct msg_queue *msq;"
+    },
+    "variable_types": {
+      "msq": "struct pointer"
+    },
+    "type_mapping": {
+      "msq": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 691,
+    "critical_vars": [
+      "msq"
+    ],
+    "function": "do_msgsnd",
+    "filename": "linux/CVE-2013-4483/CVE-2013-4483_CWE-189_6062a8dc0517bce23e3c2f7d2fea5e22411269a3_msg.c.diff",
+    "label": "False",
+    "function_code": "\nlong do_msgsnd(int msqid, long mtype, void __user *mtext,\n\t\tsize_t msgsz, int msgflg)\n{\n\tstruct msg_queue *msq;\n\tstruct msg_msg *msg;\n\tint err;\n\tstruct ipc_namespace *ns;\n\n\tns = current->nsproxy->ipc_ns;\n\n\tif (msgsz > ns->msg_ctlmax || (long) msgsz < 0 || msqid < 0)\n\t\treturn -EINVAL;\n\tif (mtype < 1)\n\t\treturn -EINVAL;\n\n\tmsg = load_msg(mtext, msgsz);\n\tif (IS_ERR(msg))\n\t\treturn PTR_ERR(msg);\n\n\tmsg->m_type = mtype;\n\tmsg->m_ts = msgsz;\n\n\tmsq = msg_lock_check(ns, msqid);\n\tif (IS_ERR(msq)) {\n\t\terr = PTR_ERR(msq);\n\t\tgoto out_free;\n\t}\n\n\tfor (;;) {\n\t\tstruct msg_sender s;\n\n\t\terr = -EACCES;\n\t\tif (ipcperms(ns, &msq->q_perm, S_IWUGO))\n\t\t\tgoto out_unlock_free;\n\n\t\terr = security_msg_queue_msgsnd(msq, msg, msgflg);\n\t\tif (err)\n\t\t\tgoto out_unlock_free;\n\n\t\tif (msgsz + msq->q_cbytes <= msq->q_qbytes &&\n\t\t\t\t1 + msq->q_qnum <= msq->q_qbytes) {\n\t\t\tbreak;\n\t\t}\n\n\t\t/* queue full, wait: */\n\t\tif (msgflg & IPC_NOWAIT) {\n\t\t\terr = -EAGAIN;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\t\tss_add(msq, &s);\n\n\t\tif (!ipc_rcu_getref(msq)) {\n\t\t\terr = -EIDRM;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\n\t\tmsg_unlock(msq);\n\t\tschedule();\n\n\t\tipc_lock_by_ptr(&msq->q_perm);\n\t\tipc_rcu_putref(msq);\n\t\tif (msq->q_perm.deleted) {\n\t\t\terr = -EIDRM;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\t\tss_del(&s);\n\n\t\tif (signal_pending(current)) {\n\t\t\terr = -ERESTARTNOHAND;\n\t\t\tgoto out_unlock_free;\n\t\t}\n\t}\n\n\tmsq->q_lspid = task_tgid_vnr(current);\n\tmsq->q_stime = get_seconds();\n\n\tif (!pipelined_send(msq, msg)) {\n\t\t/* no one is waiting for this message, enqueue it */\n\t\tlist_add_tail(&msg->m_list, &msq->q_messages);\n\t\tmsq->q_cbytes += msgsz;\n\t\tmsq->q_qnum++;\n\t\tatomic_add(msgsz, &ns->msg_bytes);\n\t\tatomic_inc(&ns->msg_hdrs);\n\t}\n\n\terr = 0;\n\tmsg = NULL;\n\nout_unlock_free:\n\tmsg_unlock(msq);\nout_free:\n\tif (msg != NULL)\n\t\tfree_msg(msg);\n\treturn err;\n}",
+    "variable_definitions": {
+      "msq": "struct msg_queue *msq;"
+    },
+    "variable_types": {
+      "msq": "struct pointer"
+    },
+    "type_mapping": {
+      "msq": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Assignment",
+    "line_new": 3552,
+    "critical_vars": [
+      "ret"
+    ],
+    "function": "__nfs4_get_acl_uncached",
+    "filename": "linux/CVE-2011-4131/CVE-2011-4131_CWE-189_bf118a342f10dafe44b14451a1392c3254629a1f_nfs4proc.c.diff",
+    "label": "False",
+    "function_code": "static ssize_t __nfs4_get_acl_uncached(struct inode *inode, void *buf, size_t buflen)\n{\n\tstruct page *pages[NFS4ACL_MAXPAGES] = {NULL, };\n\tstruct nfs_getaclargs args = {\n\t\t.fh = NFS_FH(inode),\n\t\t.acl_pages = pages,\n\t\t.acl_len = buflen,\n\t};\n\tstruct nfs_getaclres res = {\n\t\t.acl_len = buflen,\n\t};\n\tvoid *resp_buf;\n\tstruct rpc_message msg = {\n\t\t.rpc_proc = &nfs4_procedures[NFSPROC4_CLNT_GETACL],\n\t\t.rpc_argp = &args,\n\t\t.rpc_resp = &res,\n\t};\n\tint ret = -ENOMEM, npages, i, acl_len = 0;\n\n\tnpages = (buflen + PAGE_SIZE - 1) >> PAGE_SHIFT;\n\t/* As long as we're doing a round trip to the server anyway,\n\t * let's be prepared for a page of acl data. */\n\tif (npages == 0)\n\t\tnpages = 1;\n\n\tfor (i = 0; i < npages; i++) {\n\t\tpages[i] = alloc_page(GFP_KERNEL);\n\t\tif (!pages[i])\n\t\t\tgoto out_free;\n\t}\n\tif (npages > 1) {\n\t\t/* for decoding across pages */\n\t\targs.acl_scratch = alloc_page(GFP_KERNEL);\n\t\tif (!args.acl_scratch)\n\t\t\tgoto out_free;\n\t}\n\targs.acl_len = npages * PAGE_SIZE;\n\targs.acl_pgbase = 0;\n\t/* Let decode_getfacl know not to fail if the ACL data is larger than\n\t * the page we send as a guess */\n\tif (buf == NULL)\n\t\tres.acl_flags |= NFS4_ACL_LEN_REQUEST;\n\tresp_buf = page_address(pages[0]);\n\n\tdprintk(\"%s  buf %p buflen %ld npages %d args.acl_len %ld\\n\",\n\t\t__func__, buf, buflen, npages, args.acl_len);\n\tret = nfs4_call_sync(NFS_SERVER(inode)->client, NFS_SERVER(inode),\n\t\t\t     &msg, &args.seq_args, &res.seq_res, 0);\n\tif (ret)\n\t\tgoto out_free;\n\n\tacl_len = res.acl_len - res.acl_data_offset;\n\tif (acl_len > args.acl_len)\n\t\tnfs4_write_cached_acl(inode, NULL, acl_len);\n\telse\n\t\tnfs4_write_cached_acl(inode, resp_buf + res.acl_data_offset,\n\t\t\t\t      acl_len);\n\tif (buf) {\n\t\tret = -ERANGE;\n\t\tif (acl_len > buflen)\n\t\t\tgoto out_free;\n\t\t_copy_from_pages(buf, pages, res.acl_data_offset,\n\t\t\t\tres.acl_len);\n\t}\n\tret = acl_len;\nout_free:\n\tfor (i = 0; i < npages; i++)\n\t\tif (pages[i])\n\t\t\t__free_page(pages[i]);\n\tif (args.acl_scratch)\n\t\t__free_page(args.acl_scratch);\n\treturn ret;\n}",
+    "variable_definitions": {
+      "ret": "int ret = -ENOMEM, npages, i, acl_len = 0;"
+    },
+    "variable_types": {
+      "ret": "integer"
+    },
+    "type_mapping": {
+      "ret": "Integer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 2520,
+    "line_new": 2520,
+    "critical_vars": [
+      "replen"
+    ],
+    "function": "nfs4_xdr_enc_getacl",
+    "filename": "linux/CVE-2011-4131/CVE-2011-4131_CWE-189_bf118a342f10dafe44b14451a1392c3254629a1f_nfs4xdr.c.diff",
+    "label": "False",
+    "function_code": "static void nfs4_xdr_enc_getacl(struct rpc_rqst *req, struct xdr_stream *xdr,\n\t\t\t\tstruct nfs_getaclargs *args)\n{\n\tstruct compound_hdr hdr = {\n\t\t.minorversion = nfs4_xdr_minorversion(&args->seq_args),\n\t};\n\tuint32_t replen;\n\n\tencode_compound_hdr(xdr, req, &hdr);\n\tencode_sequence(xdr, &args->seq_args, &hdr);\n\tencode_putfh(xdr, args->fh, &hdr);\n\treplen = hdr.replen + op_decode_hdr_maxsz + 1;\n\tencode_getattr_two(xdr, FATTR4_WORD0_ACL, 0, &hdr);\n\n\txdr_inline_pages(&req->rq_rcv_buf, replen << 2,\n\t\targs->acl_pages, args->acl_pgbase, args->acl_len);\n\txdr_set_scratch_buffer(xdr, page_address(args->acl_scratch), PAGE_SIZE);\n\n\tencode_nops(&hdr);\n}",
+    "variable_definitions": {
+      "replen": "uint32_t replen;"
+    },
+    "variable_types": {
+      "replen": "integer"
+    },
+    "type_mapping": {
+      "replen": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Assignment",
+    "line_new": 4988,
+    "critical_vars": [
+      "xdr->p"
+    ],
+    "function": "decode_getacl",
+    "filename": "linux/CVE-2011-4131/CVE-2011-4131_CWE-189_bf118a342f10dafe44b14451a1392c3254629a1f_nfs4xdr.c.diff",
+    "label": "False",
+    "function_code": "\nstatic int decode_getacl(struct xdr_stream *xdr, struct rpc_rqst *req,\n\t\t\t struct nfs_getaclres *res)\n{\n\t__be32 *savep, *bm_p;\n\tuint32_t attrlen,\n\t\t bitmap[3] = {0};\n\tstruct kvec *iov = req->rq_rcv_buf.head;\n\tint status;\n\n\tres->acl_len = 0;\n\tif ((status = decode_op_hdr(xdr, OP_GETATTR)) != 0)\n\t\tgoto out;\n\tbm_p = xdr->p;\n\tif ((status = decode_attr_bitmap(xdr, bitmap)) != 0)\n\t\tgoto out;\n\tif ((status = decode_attr_length(xdr, &attrlen, &savep)) != 0)\n\t\tgoto out;\n\n\tif (unlikely(bitmap[0] & (FATTR4_WORD0_ACL - 1U)))\n\t\treturn -EIO;\n\tif (likely(bitmap[0] & FATTR4_WORD0_ACL)) {\n\t\tsize_t hdrlen;\n\t\tu32 recvd;\n\n\t\t/* The bitmap (xdr len + bitmaps) and the attr xdr len words\n\t\t * are stored with the acl data to handle the problem of\n\t\t * variable length bitmaps.*/\n\t\txdr->p = bm_p;\n\t\tres->acl_data_offset = be32_to_cpup(bm_p) + 2;\n\t\tres->acl_data_offset <<= 2;\n\n\t\t/* We ignore &savep and don't do consistency checks on\n\t\t * the attr length.  Let userspace figure it out.... */\n\t\thdrlen = (u8 *)xdr->p - (u8 *)iov->iov_base;\n\t\tattrlen += res->acl_data_offset;\n\t\trecvd = req->rq_rcv_buf.len - hdrlen;\n\t\tif (attrlen > recvd) {\n\t\t\tif (res->acl_flags & NFS4_ACL_LEN_REQUEST) {\n\t\t\t\t/* getxattr interface called with a NULL buf */\n\t\t\t\tres->acl_len = attrlen;\n\t\t\t\tgoto out;\n\t\t\t}\n\t\t\tdprintk(\"NFS: acl reply: attrlen %u > recvd %u\\n\",\n\t\t\t\t\tattrlen, recvd);\n\t\t\treturn -EINVAL;\n\t\t}\n\t\txdr_read_pages(xdr, attrlen);\n\t\tres->acl_len = attrlen;\n\t} else\n\t\tstatus = -EOPNOTSUPP;\n\nout:\n\treturn status;\n}\n\nstatic int\ndecode_savefh(struct xdr_stream *xdr)\n{\n\treturn decode_op_hdr(xdr, OP_SAVEFH);\n}\n\nstatic int decode_setattr(struct xdr_stream *xdr)\n{\n\t__be32 *p;\n\tuint32_t bmlen;\n\tint status;\n\n\tstatus = decode_op_hdr(xdr, OP_SETATTR);\n\tif (status)\n\t\treturn status;\n\tp = xdr_inline_decode(xdr, 4);\n\tif (unlikely(!p))\n\t\tgoto out_overflow;\n\tbmlen = be32_to_cpup(p);\n\tp = xdr_inline_decode(xdr, bmlen << 2);\n\tif (likely(p))\n\t\treturn 0;\nout_overflow:\n\tprint_overflow_msg(__func__, xdr);\n\treturn -EIO;\n}\n\nstatic int decode_setcl\n... (function end not found)",
+    "variable_definitions": {
+      "xdr->p": "Definition not found"
+    },
+    "variable_types": {
+      "xdr->p": "struct pointer_integer pointer"
+    },
+    "type_mapping": {
+      "xdr->p": "struct pointer_integer pointer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 6031,
+    "line_new": 6046,
+    "critical_vars": [
+      "status"
+    ],
+    "function": "nfs4_xdr_dec_getacl",
+    "filename": "linux/CVE-2011-4131/CVE-2011-4131_CWE-189_bf118a342f10dafe44b14451a1392c3254629a1f_nfs4xdr.c.diff",
+    "label": "False",
+    "function_code": "static int\nnfs4_xdr_dec_getacl(struct rpc_rqst *rqstp, struct xdr_stream *xdr,\n\t\t    struct nfs_getaclres *res)\n{\n\tstruct compound_hdr hdr;\n\tint status;\n\n\tstatus = decode_compound_hdr(xdr, &hdr);\n\tif (status)\n\t\tgoto out;\n\tstatus = decode_sequence(xdr, &res->seq_res, rqstp);\n\tif (status)\n\t\tgoto out;\n\tstatus = decode_putfh(xdr);\n\tif (status)\n\t\tgoto out;\n\tstatus = decode_getacl(xdr, rqstp, res);\n\nout:\n\treturn status;\n}",
+    "variable_definitions": {
+      "status": "int status;"
+    },
+    "variable_types": {
+      "status": "integer"
+    },
+    "type_mapping": {
+      "status": "Integer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 244,
+    "line_new": 244,
+    "critical_vars": [
+      "err"
+    ],
+    "function": "sequencer_write",
+    "filename": "linux/CVE-2011-1476/CVE-2011-1476_CWE-189_b769f49463711205d57286e64cf535ed4daf59e9_sequencer.c.diff",
+    "label": "False",
+    "function_code": "\nint sequencer_write(int dev, struct file *file, const char __user *buf, int count)\n{\n\tunsigned char event_rec[EV_SZ], ev_code;\n\tint p = 0, c, ev_size;\n\tint mode = translate_mode(file);\n\n\tdev = dev >> 4;\n\n\tDEB(printk(\"sequencer_write(dev=%d, count=%d)\\n\", dev, count));\n\n\tif (mode == OPEN_READ)\n\t\treturn -EIO;\n\n\tc = count;\n\n\twhile (c >= 4)\n\t{\n\t\tif (copy_from_user((char *) event_rec, &(buf)[p], 4))\n\t\t\tgoto out;\n\t\tev_code = event_rec[0];\n\n\t\tif (ev_code == SEQ_FULLSIZE)\n\t\t{\n\t\t\tint err, fmt;\n\n\t\t\tdev = *(unsigned short *) &event_rec[2];\n\t\t\tif (dev < 0 || dev >= max_synthdev || synth_devs[dev] == NULL)\n\t\t\t\treturn -ENXIO;\n\n\t\t\tif (!(synth_open_mask & (1 << dev)))\n\t\t\t\treturn -ENXIO;\n\n\t\t\tfmt = (*(short *) &event_rec[0]) & 0xffff;\n\t\t\terr = synth_devs[dev]->load_patch(dev, fmt, buf + p, c, 0);\n\t\t\tif (err < 0)\n\t\t\t\treturn err;\n\n\t\t\treturn err;\n\t\t}\n\t\tif (ev_code >= 128)\n\t\t{\n\t\t\tif (seq_mode == SEQ_2 && ev_code == SEQ_EXTENDED)\n\t\t\t{\n\t\t\t\tprintk(KERN_WARNING \"Sequencer: Invalid level 2 event %x\\n\", ev_code);\n\t\t\t\treturn -EINVAL;\n\t\t\t}\n\t\t\tev_size = 8;\n\n\t\t\tif (c < ev_size)\n\t\t\t{\n\t\t\t\tif (!seq_playing)\n\t\t\t\t\tseq_startplay();\n\t\t\t\treturn count - c;\n\t\t\t}\n\t\t\tif (copy_from_user((char *)&event_rec[4],\n\t\t\t\t\t   &(buf)[p + 4], 4))\n\t\t\t\tgoto out;\n\n\t\t}\n\t\telse\n\t\t{\n\t\t\tif (seq_mode == SEQ_2)\n\t\t\t{\n\t\t\t\tprintk(KERN_WARNING \"Sequencer: 4 byte event in level 2 mode\\n\");\n\t\t\t\treturn -EINVAL;\n\t\t\t}\n\t\t\tev_size = 4;\n\n\t\t\tif (event_rec[0] != SEQ_MIDIPUTC)\n\t\t\t\tobsolete_api_used = 1;\n\t\t}\n\n\t\tif (event_rec[0] == SEQ_MIDIPUTC)\n\t\t{\n\t\t\tif (!midi_opened[event_rec[2]])\n\t\t\t{\n\t\t\t\tint err, mode;\n\t\t\t\tint dev = event_rec[2];\n\n\t\t\t\tif (dev >= max_mididev || midi_devs[dev]==NULL)\n\t\t\t\t{\n\t\t\t\t\t/*printk(\"Sequencer Error: Nonexistent MIDI device %d\\n\", dev);*/\n\t\t\t\t\treturn -ENXIO;\n\t\t\t\t}\n\t\t\t\tmode = translate_mode(file);\n\n\t\t\t\tif ((err = midi_devs[dev]->open(dev, mode,\n\t\t\t\t\t\t\t\tsequencer_midi_input, sequencer_midi_output)) < 0)\n\t\t\t\t{\n\t\t\t\t\tseq_reset();\n\t\t\t\t\tprintk(KERN_WARNING \"Sequencer Error: Unable to open Midi #%d\\n\", dev);\n\t\t\t\t\treturn err;\n\t\t\t\t}\n\t\t\t\tmidi_opened[dev] = 1;\n\t\t\t}\n\t\t}\n\t\tif (!seq_queue(event_rec, (file->f_flags & (O_NONBLOCK) ? 1 : 0)))\n\t\t{\n\t\t\tint processed = count - c;\n\n\t\t\tif (!seq_playing)\n\t\t\t\tseq_startplay();\n\n\t\t\tif (!processed && (file->f_flags & O_NONBLOCK))\n\t\t\t\treturn -EAGAIN;\n\t\t\telse\n\t\t\t\treturn processed;\n\t\t}\n\t\tp += ev_size;\n\t\tc -= ev_size;\n\t}\n\n\tif (!seq_playing)\n\t\tseq_startplay();\nout:\n\treturn count;\n}",
+    "variable_definitions": {
+      "err": "int err, fmt;"
+    },
+    "variable_types": {
+      "err": "integer"
+    },
+    "type_mapping": {
+      "err": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "if-Condition",
+    "line_old": 514,
+    "critical_vars": [
+      "count"
+    ],
+    "function": "midi_synth_load_patch",
+    "filename": "linux/CVE-2011-1476/CVE-2011-1476_CWE-189_b769f49463711205d57286e64cf535ed4daf59e9_midi_synth.c.diff",
+    "label": "True",
+    "function_code": "\nint\nmidi_synth_load_patch(int dev, int format, const char __user *addr,\n\t\t      int offs, int count, int pmgr_flag)\n{\n\tint             orig_dev = synth_devs[dev]->midi_dev;\n\n\tstruct sysex_info sysex;\n\tint             i;\n\tunsigned long   left, src_offs, eox_seen = 0;\n\tint             first_byte = 1;\n\tint             hdr_size = (unsigned long) &sysex.data[0] - (unsigned long) &sysex;\n\n\tleave_sysex(dev);\n\n\tif (!prefix_cmd(orig_dev, 0xf0))\n\t\treturn 0;\n\n\tif (format != SYSEX_PATCH)\n\t{\n/*\t\t  printk(\"MIDI Error: Invalid patch format (key) 0x%x\\n\", format);*/\n\t\t  return -EINVAL;\n\t}\n\tif (count < hdr_size)\n\t{\n/*\t\tprintk(\"MIDI Error: Patch header too short\\n\");*/\n\t\treturn -EINVAL;\n\t}\n\tcount -= hdr_size;\n\n\t/*\n\t * Copy the header from user space but ignore the first bytes which have\n\t * been transferred already.\n\t */\n\n\tif(copy_from_user(&((char *) &sysex)[offs], &(addr)[offs], hdr_size - offs))\n\t\treturn -EFAULT;\n \n \tif (count < sysex.len)\n\t{\n/*\t\tprintk(KERN_WARNING \"MIDI Warning: Sysex record too short (%d<%d)\\n\", count, (int) sysex.len);*/\n\t\tsysex.len = count;\n\t}\n  \tleft = sysex.len;\n  \tsrc_offs = 0;\n\n\tfor (i = 0; i < left && !signal_pending(current); i++)\n\t{\n\t\tunsigned char   data;\n\n\t\tif (get_user(data,\n\t\t    (unsigned char __user *)(addr + hdr_size + i)))\n\t\t\treturn -EFAULT;\n\n\t\teox_seen = (i > 0 && data & 0x80);\t/* End of sysex */\n\n\t\tif (eox_seen && data != 0xf7)\n\t\t\tdata = 0xf7;\n\n\t\tif (i == 0)\n\t\t{\n\t\t\tif (data != 0xf0)\n\t\t\t{\n\t\t\t\tprintk(KERN_WARNING \"midi_synth: Sysex start missing\\n\");\n\t\t\t\treturn -EINVAL;\n\t\t\t}\n\t\t}\n\t\twhile (!midi_devs[orig_dev]->outputc(orig_dev, (unsigned char) (data & 0xff)) &&\n\t\t\t!signal_pending(current))\n\t\t\tschedule();\n\n\t\tif (!first_byte && data & 0x80)\n\t\t\treturn 0;\n\t\tfirst_byte = 0;\n\t}\n\n\tif (!eox_seen)\n\t\tmidi_outc(orig_dev, 0xf7);\n\treturn 0;\n}",
+    "variable_definitions": {
+      "count": "int count"
+    },
+    "variable_types": {
+      "count": "integer"
+    },
+    "type_mapping": {
+      "count": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Fun-Call",
+    "line_new": 134,
+    "critical_vars": [
+      "page_size",
+      "pfn",
+      "kvm"
+    ],
+    "function": "kvm_iommu_map_pages",
+    "filename": "linux/CVE-2014-3601/CVE-2014-3601_CWE-189_350b8bdd689cd2ab2c67c8a86a0be86cfa0751a7_iommu.c.diff",
+    "label": "False",
+    "function_code": "\nint kvm_iommu_map_pages(struct kvm *kvm, struct kvm_memory_slot *slot)\n{\n\tgfn_t gfn, end_gfn;\n\tpfn_t pfn;\n\tint r = 0;\n\tstruct iommu_domain *domain = kvm->arch.iommu_domain;\n\tint flags;\n\n\t/* check if iommu exists and in use */\n\tif (!domain)\n\t\treturn 0;\n\n\tgfn     = slot->base_gfn;\n\tend_gfn = gfn + slot->npages;\n\n\tflags = IOMMU_READ;\n\tif (!(slot->flags & KVM_MEM_READONLY))\n\t\tflags |= IOMMU_WRITE;\n\tif (!kvm->arch.iommu_noncoherent)\n\t\tflags |= IOMMU_CACHE;\n\n\n\twhile (gfn < end_gfn) {\n\t\tunsigned long page_size;\n\n\t\t/* Check if already mapped */\n\t\tif (iommu_iova_to_phys(domain, gfn_to_gpa(gfn))) {\n\t\t\tgfn += 1;\n\t\t\tcontinue;\n\t\t}\n\n\t\t/* Get the page size we could use to map */\n\t\tpage_size = kvm_host_page_size(kvm, gfn);\n\n\t\t/* Make sure the page_size does not exceed the memslot */\n\t\twhile ((gfn + (page_size >> PAGE_SHIFT)) > end_gfn)\n\t\t\tpage_size >>= 1;\n\n\t\t/* Make sure gfn is aligned to the page size we want to map */\n\t\twhile ((gfn << PAGE_SHIFT) & (page_size - 1))\n\t\t\tpage_size >>= 1;\n\n\t\t/* Make sure hva is aligned to the page size we want to map */\n\t\twhile (__gfn_to_hva_memslot(slot, gfn) & (page_size - 1))\n\t\t\tpage_size >>= 1;\n\n\t\t/*\n\t\t * Pin all pages we are about to map in memory. This is\n\t\t * important because we unmap and unpin in 4kb steps later.\n\t\t */\n\t\tpfn = kvm_pin_pages(slot, gfn, page_size);\n\t\tif (is_error_noslot_pfn(pfn)) {\n\t\t\tgfn += 1;\n\t\t\tcontinue;\n\t\t}\n\n\t\t/* Map into IO address space */\n\t\tr = iommu_map(domain, gfn_to_gpa(gfn), pfn_to_hpa(pfn),\n\t\t\t      page_size, flags);\n\t\tif (r) {\n\t\t\tprintk(KERN_ERR \"kvm_iommu_map_address:\"\n\t\t\t       \"iommu failed to map pfn=%llx\\n\", pfn);\n\t\t\tkvm_unpin_pages(kvm, pfn, page_size);\n\t\t\tgoto unmap_pages;\n\t\t}\n\n\t\tgfn += page_size >> PAGE_SHIFT;\n\n\n\t}\n\n\treturn 0;\n\nunmap_pages:\n\tkvm_iommu_put_pages(kvm, slot->base_gfn, gfn - slot->base_gfn);\n\treturn r;\n}",
+    "variable_definitions": {
+      "page_size": "unsigned long page_size;",
+      "pfn": "pfn_t pfn;",
+      "kvm": "struct kvm *kvm"
+    },
+    "variable_types": {
+      "page_size": "integer",
+      "pfn": "integer",
+      "kvm": "struct pointer"
+    },
+    "type_mapping": {
+      "page_size": "Integer",
+      "pfn": "Integer",
+      "kvm": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 648,
+    "critical_vars": [
+      "vma->vm_ops"
+    ],
+    "function": "uio_mmap_physical",
+    "filename": "linux/CVE-2013-4511/CVE-2013-4511_CWE-189_7314e613d5ff9f0934f7a0f74ed7973b903315d1_uio.c.diff",
+    "label": "True",
+    "function_code": "\nstatic int uio_mmap_physical(struct vm_area_struct *vma)\n{\n\tstruct uio_device *idev = vma->vm_private_data;\n\tint mi = uio_find_mem_index(vma);\n\tif (mi < 0)\n\t\treturn -EINVAL;\n\n\tvma->vm_ops = &uio_physical_vm_ops;\n\n\tvma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);\n\n\treturn remap_pfn_range(vma,\n\t\t\t       vma->vm_start,\n\t\t\t       idev->info->mem[mi].addr >> PAGE_SHIFT,\n\t\t\t       vma->vm_end - vma->vm_start,\n\t\t\t       vma->vm_page_prot);\n}",
+    "variable_definitions": {
+      "vma->vm_ops": "Definition not found"
+    },
+    "variable_types": {
+      "vma->vm_ops": "struct pointer_struct pointer"
+    },
+    "type_mapping": {
+      "vma->vm_ops": "sp_sp"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 316,
+    "critical_vars": [
+      "t"
+    ],
+    "function": "tcp_illinois_info",
+    "filename": "linux/CVE-2012-4565/CVE-2012-4565_CWE-189_8f363b77ee4fbf7c3bbcf5ec2c5ca482d396d664_tcp_illinois.c.diff",
+    "label": "True",
+    "function_code": "static void tcp_illinois_info(struct sock *sk, u32 ext,\n\t\t\t      struct sk_buff *skb)\n{\n\tconst struct illinois *ca = inet_csk_ca(sk);\n\n\tif (ext & (1 << (INET_DIAG_VEGASINFO - 1))) {\n\t\tstruct tcpvegas_info info = {\n\t\t\t.tcpv_enabled = 1,\n\t\t\t.tcpv_rttcnt = ca->cnt_rtt,\n\t\t\t.tcpv_minrtt = ca->base_rtt,\n\t\t};\n\t\tu64 t = ca->sum_rtt;\n\n\t\tdo_div(t, ca->cnt_rtt);\n\t\tinfo.tcpv_rtt = t;\n\n\t\tnla_put(skb, INET_DIAG_VEGASINFO, sizeof(info), &info);\n\t}\n}",
+    "variable_definitions": {
+      "t": "u64 t = ca->sum_rtt;"
+    },
+    "variable_types": {
+      "t": "integer"
+    },
+    "type_mapping": {
+      "t": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 317,
+    "critical_vars": [
+      "info.tcpv_rttcnt"
+    ],
+    "function": "tcp_illinois_info",
+    "filename": "linux/CVE-2012-4565/CVE-2012-4565_CWE-189_8f363b77ee4fbf7c3bbcf5ec2c5ca482d396d664_tcp_illinois.c.diff",
+    "label": "False",
+    "function_code": "static void tcp_illinois_info(struct sock *sk, u32 ext,\n\t\t\t      struct sk_buff *skb)\n{\n\tconst struct illinois *ca = inet_csk_ca(sk);\n\n\tif (ext & (1 << (INET_DIAG_VEGASINFO - 1))) {\n\t\tstruct tcpvegas_info info = {\n\t\t\t.tcpv_enabled = 1,\n\t\t\t.tcpv_rttcnt = ca->cnt_rtt,\n\t\t\t.tcpv_minrtt = ca->base_rtt,\n\t\t};\n\n\t\tif (info.tcpv_rttcnt > 0) {\n\t\t\tu64 t = ca->sum_rtt;\n\n\t\t\tdo_div(t, info.tcpv_rttcnt);\n\t\t\tinfo.tcpv_rtt = t;\n\t\t}\n\t\tnla_put(skb, INET_DIAG_VEGASINFO, sizeof(info), &info);\n\t}\n}",
+    "variable_definitions": {
+      "info.tcpv_rttcnt": "Definition not found"
+    },
+    "variable_types": {
+      "info.tcpv_rttcnt": "struct.integer"
+    },
+    "type_mapping": {
+      "info.tcpv_rttcnt": "st.i"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 1407,
+    "critical_vars": [
+      "args->buffer_count"
+    ],
+    "function": "i915_gem_execbuffer2",
+    "filename": "linux/CVE-2012-2383/CVE-2012-2383_CWE-189_ed8cd3b2cd61004cab85380c52b1817aca1ca49b_i915_gem_execbuffer.c.diff",
+    "label": "False",
+    "function_code": "\nint\ni915_gem_execbuffer2(struct drm_device *dev, void *data,\n\t\t     struct drm_file *file)\n{\n\tstruct drm_i915_gem_execbuffer2 *args = data;\n\tstruct drm_i915_gem_exec_object2 *exec2_list = NULL;\n\tint ret;\n\n\tif (args->buffer_count < 1 ||\n\t    args->buffer_count > UINT_MAX / sizeof(*exec2_list)) {\n\t\tDRM_DEBUG(\"execbuf2 with %d buffers\\n\", args->buffer_count);\n\t\treturn -EINVAL;\n\t}\n\n\texec2_list = kmalloc(sizeof(*exec2_list)*args->buffer_count,\n\t\t\t     GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);\n\tif (exec2_list == NULL)\n\t\texec2_list = drm_malloc_ab(sizeof(*exec2_list),\n\t\t\t\t\t   args->buffer_count);\n\tif (exec2_list == NULL) {\n\t\tDRM_DEBUG(\"Failed to allocate exec list for %d buffers\\n\",\n\t\t\t  args->buffer_count);\n\t\treturn -ENOMEM;\n\t}\n\tret = copy_from_user(exec2_list,\n\t\t\t     (struct drm_i915_relocation_entry __user *)\n\t\t\t     (uintptr_t) args->buffers_ptr,\n\t\t\t     sizeof(*exec2_list) * args->buffer_count);\n\tif (ret != 0) {\n\t\tDRM_DEBUG(\"copy %d exec entries failed %d\\n\",\n\t\t\t  args->buffer_count, ret);\n\t\tdrm_free_large(exec2_list);\n\t\treturn -EFAULT;\n\t}\n\n\tret = i915_gem_do_execbuffer(dev, data, file, args, exec2_list);\n\tif (!ret) {\n\t\t/* Copy the new buffer offsets back to the user's exec list. */\n\t\tret = copy_to_user((struct drm_i915_relocation_entry __user *)\n\t\t\t\t   (uintptr_t) args->buffers_ptr,\n\t\t\t\t   exec2_list,\n\t\t\t\t   sizeof(*exec2_list) * args->buffer_count);\n\t\tif (ret) {\n\t\t\tret = -EFAULT;\n\t\t\tDRM_DEBUG(\"failed to copy %d exec entries \"\n\t\t\t\t  \"back to user (%d)\\n\",\n\t\t\t\t  args->buffer_count, ret);\n\t\t}\n\t}\n\n\tdrm_free_large(exec2_list);\n\treturn ret;\n}\n\n... (function end not found)",
+    "variable_definitions": {
+      "args->buffer_count": "Definition not found"
+    },
+    "variable_types": {
+      "args->buffer_count": "struct pointer_integer"
+    },
+    "type_mapping": {
+      "args->buffer_count": "sp_integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 916,
+    "critical_vars": [
+      "pdata"
+    ],
+    "function": "lbs_debugfs_write",
+    "filename": "linux/CVE-2013-6378/CVE-2013-6378_CWE-189_a497e47d4aec37aaf8f13509f3ef3d1f6a717d88_debugfs.c.diff",
+    "label": "True",
+    "function_code": "static ssize_t lbs_debugfs_write(struct file *f, const char __user *buf,\n\t\t\t    size_t cnt, loff_t *ppos)\n{\n\tint r, i;\n\tchar *pdata;\n\tchar *p;\n\tchar *p0;\n\tchar *p1;\n\tchar *p2;\n\tstruct debug_data *d = f->private_data;\n\n\tpdata = kmalloc(cnt, GFP_KERNEL);\n\tif (pdata == NULL)\n\t\treturn 0;\n\n\tif (copy_from_user(pdata, buf, cnt)) {\n\t\tlbs_deb_debugfs(\"Copy from user failed\\n\");\n\t\tkfree(pdata);\n\t\treturn 0;\n\t}\n\n\tp0 = pdata;\n\tfor (i = 0; i < num_of_items; i++) {\n\t\tdo {\n\t\t\tp = strstr(p0, d[i].name);\n\t\t\tif (p == NULL)\n\t\t\t\tbreak;\n\t\t\tp1 = strchr(p, '\\n');\n\t\t\tif (p1 == NULL)\n\t\t\t\tbreak;\n\t\t\tp0 = p1++;\n\t\t\tp2 = strchr(p, '=');\n\t\t\tif (!p2)\n\t\t\t\tbreak;\n\t\t\tp2++;\n\t\t\tr = simple_strtoul(p2, NULL, 0);\n\t\t\tif (d[i].size == 1)\n\t\t\t\t*((u8 *) d[i].addr) = (u8) r;\n\t\t\telse if (d[i].size == 2)\n\t\t\t\t*((u16 *) d[i].addr) = (u16) r;\n\t\t\telse if (d[i].size == 4)\n\t\t\t\t*((u32 *) d[i].addr) = (u32) r;\n\t\t\telse if (d[i].size == 8)\n\t\t\t\t*((u64 *) d[i].addr) = (u64) r;\n\t\t\tbreak;\n\t\t} while (1);\n\t}\n\tkfree(pdata);\n\n\treturn (ssize_t)cnt;\n}",
+    "variable_definitions": {
+      "pdata": "char *pdata;"
+    },
+    "variable_types": {
+      "pdata": "char pointer"
+    },
+    "type_mapping": {
+      "pdata": "char pointer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 916,
+    "critical_vars": [
+      "cnt"
+    ],
+    "function": "lbs_debugfs_write",
+    "filename": "linux/CVE-2013-6378/CVE-2013-6378_CWE-189_a497e47d4aec37aaf8f13509f3ef3d1f6a717d88_debugfs.c.diff",
+    "label": "False",
+    "function_code": "static ssize_t lbs_debugfs_write(struct file *f, const char __user *buf,\n\t\t\t    size_t cnt, loff_t *ppos)\n{\n\tint r, i;\n\tchar *pdata;\n\tchar *p;\n\tchar *p0;\n\tchar *p1;\n\tchar *p2;\n\tstruct debug_data *d = f->private_data;\n\n\tif (cnt == 0)\n\t\treturn 0;\n\n\tpdata = kmalloc(cnt + 1, GFP_KERNEL);\n\tif (pdata == NULL)\n\t\treturn 0;\n\n\tif (copy_from_user(pdata, buf, cnt)) {\n\t\tlbs_deb_debugfs(\"Copy from user failed\\n\");\n\t\tkfree(pdata);\n\t\treturn 0;\n\t}\n\tpdata[cnt] = '\\0';\n\n\tp0 = pdata;\n\tfor (i = 0; i < num_of_items; i++) {\n\t\tdo {\n\t\t\tp = strstr(p0, d[i].name);\n\t\t\tif (p == NULL)\n\t\t\t\tbreak;\n\t\t\tp1 = strchr(p, '\\n');\n\t\t\tif (p1 == NULL)\n\t\t\t\tbreak;\n\t\t\tp0 = p1++;\n\t\t\tp2 = strchr(p, '=');\n\t\t\tif (!p2)\n\t\t\t\tbreak;\n\t\t\tp2++;\n\t\t\tr = simple_strtoul(p2, NULL, 0);\n\t\t\tif (d[i].size == 1)\n\t\t\t\t*((u8 *) d[i].addr) = (u8) r;\n\t\t\telse if (d[i].size == 2)\n\t\t\t\t*((u16 *) d[i].addr) = (u16) r;\n\t\t\telse if (d[i].size == 4)\n\t\t\t\t*((u32 *) d[i].addr) = (u32) r;\n\t\t\telse if (d[i].size == 8)\n\t\t\t\t*((u64 *) d[i].addr) = (u64) r;\n\t\t\tbreak;\n\t\t} while (1);\n\t}\n\tkfree(pdata);\n\n\treturn (ssize_t)cnt;\n}",
+    "variable_definitions": {
+      "cnt": "size_t cnt"
+    },
+    "variable_types": {
+      "cnt": "integer"
+    },
+    "type_mapping": {
+      "cnt": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 6875,
+    "critical_vars": [
+      "insn->code"
+    ],
+    "function": "fixup_bpf_calls",
+    "filename": "linux/CVE-2019-7308/CVE-2019-7308_CWE-189_979d63d50c0c0f7bc537bf821e056cc9fe5abd38_verifier.c.diff",
+    "label": "False",
+    "function_code": "static int fixup_bpf_calls(struct bpf_verifier_env *env)\n{\n\tstruct bpf_prog *prog = env->prog;\n\tstruct bpf_insn *insn = prog->insnsi;\n\tconst struct bpf_func_proto *fn;\n\tconst int insn_cnt = prog->len;\n\tconst struct bpf_map_ops *ops;\n\tstruct bpf_insn_aux_data *aux;\n\tstruct bpf_insn insn_buf[16];\n\tstruct bpf_prog *new_prog;\n\tstruct bpf_map *map_ptr;\n\tint i, cnt, delta = 0;\n\n\tfor (i = 0; i < insn_cnt; i++, insn++) {\n\t\tif (insn->code == (BPF_ALU64 | BPF_MOD | BPF_X) ||\n\t\t    insn->code == (BPF_ALU64 | BPF_DIV | BPF_X) ||\n\t\t    insn->code == (BPF_ALU | BPF_MOD | BPF_X) ||\n\t\t    insn->code == (BPF_ALU | BPF_DIV | BPF_X)) {\n\t\t\tbool is64 = BPF_CLASS(insn->code) == BPF_ALU64;\n\t\t\tstruct bpf_insn mask_and_div[] = {\n\t\t\t\tBPF_MOV32_REG(insn->src_reg, insn->src_reg),\n\t\t\t\t/* Rx div 0 -> 0 */\n\t\t\t\tBPF_JMP_IMM(BPF_JNE, insn->src_reg, 0, 2),\n\t\t\t\tBPF_ALU32_REG(BPF_XOR, insn->dst_reg, insn->dst_reg),\n\t\t\t\tBPF_JMP_IMM(BPF_JA, 0, 0, 1),\n\t\t\t\t*insn,\n\t\t\t};\n\t\t\tstruct bpf_insn mask_and_mod[] = {\n\t\t\t\tBPF_MOV32_REG(insn->src_reg, insn->src_reg),\n\t\t\t\t/* Rx mod 0 -> Rx */\n\t\t\t\tBPF_JMP_IMM(BPF_JEQ, insn->src_reg, 0, 1),\n\t\t\t\t*insn,\n\t\t\t};\n\t\t\tstruct bpf_insn *patchlet;\n\n\t\t\tif (insn->code == (BPF_ALU64 | BPF_DIV | BPF_X) ||\n\t\t\t    insn->code == (BPF_ALU | BPF_DIV | BPF_X)) {\n\t\t\t\tpatchlet = mask_and_div + (is64 ? 1 : 0);\n\t\t\t\tcnt = ARRAY_SIZE(mask_and_div) - (is64 ? 1 : 0);\n\t\t\t} else {\n\t\t\t\tpatchlet = mask_and_mod + (is64 ? 1 : 0);\n\t\t\t\tcnt = ARRAY_SIZE(mask_and_mod) - (is64 ? 1 : 0);\n\t\t\t}\n\n\t\t\tnew_prog = bpf_patch_insn_data(env, i + delta, patchlet, cnt);\n\t\t\tif (!new_prog)\n\t\t\t\treturn -ENOMEM;\n\n\t\t\tdelta    += cnt - 1;\n\t\t\tenv->prog = prog = new_prog;\n\t\t\tinsn      = new_prog->insnsi + i + delta;\n\t\t\tcontinue;\n\t\t}\n\n\t\tif (BPF_CLASS(insn->code) == BPF_LD &&\n\t\t    (BPF_MODE(insn->code) == BPF_ABS ||\n\t\t     BPF_MODE(insn->code) == BPF_IND)) {\n\t\t\tcnt = env->ops->gen_ld_abs(insn, insn_buf);\n\t\t\tif (cnt == 0 || cnt >= ARRAY_SIZE(insn_buf)) {\n\t\t\t\tverbose(env, \"bpf verifier is misconfigured\\n\");\n\t\t\t\treturn -EINVAL;\n\t\t\t}\n\n\t\t\n... (function end not found)",
+    "variable_definitions": {
+      "insn->code": "Definition not found"
+    },
+    "variable_types": {
+      "insn->code": "struct pointer_integer"
+    },
+    "type_mapping": {
+      "insn->code": "sp_integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "if-Condition",
+    "line_old": 3120,
+    "critical_vars": [
+      "env->allow_ptr_leaks",
+      "insn->code"
+    ],
+    "function": "sanitize_ptr_alu",
+    "filename": "linux/CVE-2019-7308/CVE-2019-7308_CWE-189_d3bd7413e0ca40b60cf60d4003246d067cafdeda_verifier.c.diff",
+    "label": "True",
+    "function_code": "\nstatic int sanitize_ptr_alu(struct bpf_verifier_env *env,\n\t\t\t    struct bpf_insn *insn,\n\t\t\t    const struct bpf_reg_state *ptr_reg,\n\t\t\t    struct bpf_reg_state *dst_reg,\n\t\t\t    bool off_is_neg)\n{\n\tstruct bpf_verifier_state *vstate = env->cur_state;\n\tstruct bpf_insn_aux_data *aux = cur_aux(env);\n\tbool ptr_is_dst_reg = ptr_reg == dst_reg;\n\tu8 opcode = BPF_OP(insn->code);\n\tu32 alu_state, alu_limit;\n\tstruct bpf_reg_state tmp;\n\tbool ret;\n\n\tif (env->allow_ptr_leaks || BPF_SRC(insn->code) == BPF_K)\n\t\treturn 0;\n\n\t/* We already marked aux for masking from non-speculative\n\t * paths, thus we got here in the first place. We only care\n\t * to explore bad access from here.\n\t */\n\tif (vstate->speculative)\n\t\tgoto do_sim;\n\n\talu_state  = off_is_neg ? BPF_ALU_NEG_VALUE : 0;\n\talu_state |= ptr_is_dst_reg ?\n\t\t     BPF_ALU_SANITIZE_SRC : BPF_ALU_SANITIZE_DST;\n\n\tif (retrieve_ptr_limit(ptr_reg, &alu_limit, opcode, off_is_neg))\n\t\treturn 0;\n\n\t/* If we arrived here from different branches with different\n\t * limits to sanitize, then this won't work.\n\t */\n\tif (aux->alu_state &&\n\t    (aux->alu_state != alu_state ||\n\t     aux->alu_limit != alu_limit))\n\t\treturn -EACCES;\n\n\t/* Corresponding fixup done in fixup_bpf_calls(). */\n\taux->alu_state = alu_state;\n\taux->alu_limit = alu_limit;\n\ndo_sim:\n\t/* Simulate and find potential out-of-bounds access under\n\t * speculative execution from truncation as a result of\n\t * masking when off was not within expected range. If off\n\t * sits in dst, then we temporarily need to move ptr there\n\t * to simulate dst (== 0) +/-= ptr. Needed, for example,\n\t * for cases where we use K-based arithmetic in one direction\n\t * and truncated reg-based in the other in order to explore\n\t * bad access.\n\t */\n\tif (!ptr_is_dst_reg) {\n\t\ttmp = *dst_reg;\n\t\t*dst_reg = *ptr_reg;\n\t}\n\tret = push_stack(env, env->insn_idx + 1, env->insn_idx, true);\n\tif (!ptr_is_dst_reg)\n\t\t*dst_reg = tmp;\n\treturn !ret ? -EFAULT : 0;\n}\n\n/* Handles arithmetic on a pointer and a scalar: computes new min/max and var_off.\n * Caller should also handle BPF_MOV case separately.\n * If we return -EACCES, caller may want to try again treating pointer as a\n * scalar.  So we only emit a diagnostic if !env->allow_ptr_leaks.\n */\nstatic int adjust_ptr_min_max_vals(struct bpf_verifier_env *env,\n\t\t\t\t   struct bpf_insn *insn,\n\t\t\t\t   const struct bpf_reg_state *ptr_reg,\n\t\t\t\t   const struct bpf_reg_state *off_reg)\n{\n\tstruct bpf_verifier_state *vstate = env->cur_state;\n\tstruct bpf_func_state *state = vstate->frame[vstate->curframe];\n\tstruct bpf_reg_state *regs = state->regs, *dst_reg;\n\tbool known = tnum_is_const(off_reg->var_off);\n\ts64 smin_val = off_reg->smin_value, smax_val = off_reg->smax_value,\n\t    smin_ptr = ptr_reg->smin_value, smax_ptr = ptr_reg->smax_value;\n\tu64 umin_val = off_reg->umin_value, umax_val = off_reg->umax_value,\n\t    umin_ptr = ptr_reg->umin_value, umax_ptr = ptr_reg->umax_value;\n\tu32 dst = insn->dst_reg, src = insn->src_reg;\n\tu8 opcode = BPF_OP(insn->code);\n\tint ret;\n\n\tdst_reg = &regs[dst];\n\n\tif ((known && (smin_val != smax_val || umin_val != umax_val)) ||\n\t    smin_val > smax_val || umin_val > umax_val) {\n\t\t/* Taint dst register if offset had invalid bounds derived from\n\t\t * e.g. dead branches.\n\t\t */\n\t\t__mark_reg_unknown(dst_reg);\n\t\treturn 0;\n\t}\n\n\tif (BPF_CLASS(insn->code) != BPF_ALU64) {\n\t\t/* 32-bit ALU ops on pointers produce (meaningless) scalars */\n\t\tverbose(env,\n\t\t\t\"R%d 32-bit pointer arithmetic prohibited\\n\",\n\t\t\tdst);\n\t\treturn -EACCES;\n\t}\n\n\tswitch (ptr_reg->type) {\n\tcase PTR_TO_MAP_VALUE_OR_NULL:\n\t\tverbose(env, \"R%d pointer arithmetic on %s prohibited, null-check it first\\n\",\n\t\t\tdst, reg_type_str[ptr_reg->type]);\n\t\treturn -EACCES;\n\tcase CONST_PTR_TO_MAP:\n\tcase PTR_TO_PACKET_END:\n\tcase PTR_TO_SOCKET:\n\tcase PTR_TO_SOCKET_OR_NULL:\n\t\tverbose(env, \"R%d pointer arithmetic on %s prohibited\\n\",\n\t\t\tdst, reg_type_str[ptr_reg->type]);\n\t\treturn -EACCES;\n\tcase PTR_TO_MAP_VALUE:\n\t\tif (!env->allow_ptr_leaks && !known && (smin_val < 0) != (smax_val < 0)) {\n\t\t\tverbose(env, \"R%d has unknown scalar with mixed signed bounds, pointer arithmetic with it prohibited for !root\\n\",\n\t\t\t\toff_reg == dst_reg ? dst : src);\n\t\t\treturn -EACCES;\n\t\t}\n\t\t/* fall-through */\n\tdefault:\n\t\tbreak;\n\t}\n\n\t/* In case of 'scalar += pointer', dst_reg inherits pointer type and id.\n\t * The id may be overwritten later if we create a new variable offset.\n\t */\n\tdst_reg->type = ptr_reg->type;\n\tdst_reg->id = ptr_reg->id;\n\n\tif (!check_reg_sane_offset(env, off_reg, ptr_reg->type) ||\n\t    !check_reg_sane_offset(env, ptr_reg, ptr_reg->type))\n\t\treturn -EINVAL;\n\n\tswitch (opcode) {\n\tcase BPF_ADD:\n\t\tret = sanitize_ptr_alu(env, insn, ptr_reg, dst_reg, smin_val < 0);\n\t\tif (ret < 0) {\n\t\t\tverbose(env, \"R%d tried to add from different maps or paths\\n\", dst);\n\t\t\treturn ret;\n\t\t}\n\t\t/* We can take a fixed offset as long as it doesn't overflow\n\t\t * the s32 'off' field\n\t\t */\n\t\tif (known && (ptr_reg->off + smin_val ==\n\t\t\t      (s64)(s32)(ptr_reg->off + smin_val))) {\n\t\t\t/* pointer += K.  Accumulate it into fixed offset */\n\t\t\tdst_reg->smin_value = smin_ptr;\n\t\t\tdst_reg->smax_value = smax_ptr;\n\t\t\tdst_reg->umin_value = umin_ptr;\n\t\t\tdst_reg->umax_value = umax_ptr;\n\t\t\tdst_reg->var_off = ptr_reg->var_off;\n\t\t\tdst_reg->off = ptr_reg->off + smin_val;\n\t\t\tdst_reg->raw = ptr_reg->raw;\n\t\t\tbreak;\n\t\t}\n\t\t/* A new variable offset is created.  Note that off_reg->off\n\t\t * == 0, since it's a scalar.\n\t\t * dst_reg gets the pointer type and since some positive\n\t\t * integer value was added to the pointer, give it a new 'id'\n\t\t * if it's a PTR_TO_PACKET.\n\t\t * this creates a new 'base' pointer, off_reg (variable) gets\n\t\t * added into the variable offset, and we copy the fixed offset\n\t\t * from ptr_reg.\n\t\t */\n\t\tif (signed_add_overflows(smin_ptr, smin_val) ||\n\t\t    signed_add_overflows(smax_ptr, smax_val)) {\n\t\t\tdst_reg->smin_value = S64_MIN;\n\t\t\tdst_reg->smax_value = S64_MAX;\n\t\t} else {\n\t\t\tdst_reg->smin_value = smin_ptr + smin_val;\n\t\t\tdst_reg->smax_value = smax_ptr + smax_val;\n\t\t}\n\t\tif (umin_ptr + umin_val < umin_ptr ||\n\t\t    umax_ptr + umax_val < umax_ptr) {\n\t\t\tdst_reg->umin_value = 0;\n\t\t\tdst_reg->umax_value = U64_MAX;\n\t\t} else {\n\t\t\tdst_reg->umin_value = umin_ptr + umin_val;\n\t\t\tdst_reg->umax_value = umax_ptr + umax_val;\n\t\t}\n\t\tdst_reg->var_off = tnum_add(ptr_reg->var_off, off_reg->var_off);\n\t\tdst_reg->off = ptr_reg->off;\n\t\tdst_reg->raw = ptr_reg->raw;\n\t\tif (reg_is_pkt_pointer(ptr_reg)) {\n\t\t\tdst_reg->id = ++env->id_gen;\n\t\t\t/* something was added to pkt_ptr, set range to zero */\n\t\t\tdst_reg->raw = 0;\n\t\t}\n\t\tbreak;\n\tcase BPF_SUB:\n\t\tret = sanitize_ptr_alu(env, insn, ptr_reg, dst_reg, smin_val < 0);\n\t\tif (ret < 0) {\n\t\t\tverbose(env, \"R%d tried to sub from different maps or paths\\n\", dst);\n\t\t\treturn ret;\n\t\t}\n\t\tif (dst_reg == off_reg) {\n\t\t\t/* scalar -= pointer.  Creates an unknown scalar */\n\t\t\tverbose(env, \"R%d tried to subtract pointer from scalar\\n\",\n\t\t\t\tdst);\n\t\t\treturn -EACCES;\n\t\t}\n\t\t/* We don't allow subtraction from FP, because (according to\n\t\t * test_verifier.c test \"invalid fp arithmetic\", JITs might not\n\t\t * be able to deal with it.\n\t\t */\n\t\tif (ptr_reg->type == PTR_TO_STACK) {\n\t\t\tverbose(env, \"R%d subtraction from stack pointer prohibited\\n\",\n\t\t\t\tdst);\n\t\t\treturn -EACCES;\n\t\t}\n\t\tif (known && (ptr_reg->off - smin_val ==\n\t\t\t      (s64)(s32)(ptr_reg->off - smin_val))) {\n\t\t\t/* pointer -= K.  Subtract it from fixed offset */\n\t\t\tdst_reg->smin_value = smin_ptr;\n\t\t\tdst_reg->smax_value = smax_ptr;\n\t\t\tdst_reg->umin_value = umin_ptr;\n\t\t\tdst_reg->umax_value = umax_ptr;\n\t\t\tdst_reg->var_off = ptr_reg->var_off;\n\t\t\tdst_reg->id = ptr_reg->id;\n\t\t\tdst_reg->off = ptr_reg->off - smin_val;\n\t\t\tdst_reg->raw = ptr_reg->raw;\n\t\t\tbreak;\n\t\t}\n\t\t/* A new variable offset is created.  If the subtrahend is known\n\t\t * nonnegative, then any reg->range we had before is still good.\n\t\t */\n\t\tif (signed_sub_overflows(smin_ptr, smax_val) ||\n\t\t    signed_sub_overflows(smax_ptr, smin_val)) {\n\t\t\t/* Overflow possible, we know nothing */\n\t\t\tdst_reg->smin_value = S64_MIN;\n\t\t\tdst_reg->smax_value = S64_MAX;\n\t\t} else {\n\t\t\tdst_reg->smin_value = smin_ptr - smax_val;\n\t\t\tdst_reg->smax_value = smax_ptr - smin_val;\n\t\t}\n\t\tif (umin_ptr < umax_val) {\n\t\t\t/* Overflow possible, we know nothing */\n\t\t\tdst_reg->umin_value = 0;\n\t\t\tdst_reg->umax_value = U64_MAX;\n\t\t} else {\n\t\t\t/* Cannot overflow (as long as bounds are consistent) */\n\t\t\tdst_reg->umin_value = umin_ptr - umax_val;\n\t\t\tdst_reg->umax_value = umax_ptr - umin_val;\n\t\t}\n\t\tdst_reg->var_off = tnum_sub(ptr_reg->var_off, off_reg->var_off);\n\t\tdst_reg->off = ptr_reg->off;\n\t\tdst_reg->raw = ptr_reg->raw;\n\t\tif (reg_is_pkt_pointer(ptr_reg)) {\n\t\t\tdst_reg->id = ++env->id_gen;\n\t\t\t/* something was added to pkt_ptr, set range to zero */\n\t\t\tif (smin_val < 0)\n\t\t\t\tdst_reg->raw = 0;\n\t\t}\n\t\tbreak;\n\tcase BPF_AND:\n\tcase BPF_OR:\n\tcase BPF_XOR:\n\t\t/* bitwise ops on pointers are troublesome, prohibit. */\n\t\tverbose(env, \"R%d bitwise operator %s on pointer prohibited\\n\",\n\t\t\tdst, bpf_alu_string[opcode >> 4]);\n\t\treturn -EACCES;\n\tdefault:\n\t\t/* other operators (e.g. MUL,LSH) produce non-pointer results */\n\t\tverbose(env, \"R%d pointer arithmetic with %s operator prohibited\\n\",\n\t\t\tdst, bpf_alu_string[opcode >> 4]);\n\t\treturn -EACCES;\n\t}\n\n\tif (!check_reg_sane_offset(env, dst_reg, ptr_reg->type))\n\t\treturn -EINVAL;\n\n\t__update_reg_bounds(dst_reg);\n\t__reg_deduce_bounds(dst_reg);\n\t__reg_bound_offset(dst_reg);\n\n\t/* For unprivileged we require that resulting offset must be in bounds\n\t * in order to be able to sanitize access later on.\n\t */\n\tif (!env->allow_ptr_leaks) {\n\t\tif (dst_reg->type == PTR_TO_MAP_VALUE &&\n\t\t    check_map_access(env, dst, dst_reg->off, 1, false)) {\n\t\t\tverbose(env, \"R%d pointer arithmetic of map value goes out of range, \"\n\t\t\t\t\"prohibited for !root\\n\", dst);\n\t\t\treturn -EACCES;\n\t\t} else if (dst_reg->type == PTR_TO_STACK &&\n\t\t\t   check_stack_access(env, dst_reg, dst_reg->off +\n\t\t\t\t\t      dst_reg->var_off.value, 1)) {\n\t\t\tverbose(env, \"R%d stack pointer arithmetic goes out of range, \"\n\t\t\t\t\"prohibited for !root\\n\", dst);\n\t\t\treturn -EACCES;\n\t\t}\n\t}\n\n\treturn 0;\n}\n\n/* WARNING: This function does calculations on 64-bit values, but the actual\n * execution may occur on 32-bit values. Therefore, things like bitshifts\n * need extra checks in the 32-bit case.\n */\nstatic int adjust_scalar_min_max_vals(struct bpf_verifier_env *env,\n\t\t\t\t      struct bpf_insn *insn,\n\t\t\t\t      struct bpf_reg_state *dst_reg,\n\t\t\t\t      struct bpf_reg_state src_reg)\n{\n\tstruct bpf_reg_state *regs = cur_regs(env);\n\tu8 opcode = BPF_OP(insn->code);\n\tbool src_known, dst_known;\n\ts64 smin_val, smax_val;\n\tu64 umin_val, umax_val;\n\tu64 insn_bitness = (BPF_CLASS(insn->code) == BPF_ALU64) ? 64 : 32;\n\n\tif (insn_bitness == 32) {\n\t\t/* Relevant for 32-bit RSH: Information can propagate towards\n\t\t * LSB, so it isn't sufficient to only truncate the output to\n\t\t * 32 bits.\n\t\t */\n\t\tcoerce_reg_to_size(dst_reg, 4);\n\t\tcoerce_reg_to_size(&src_reg, 4);\n\t}",
+    "variable_definitions": {
+      "env->allow_ptr_leaks": "Definition not found",
+      "insn->code": "Definition not found"
+    },
+    "variable_types": {
+      "env->allow_ptr_leaks": "struct pointer_integer",
+      "insn->code": "struct pointer_char"
+    },
+    "type_mapping": {
+      "env->allow_ptr_leaks": "sp_integer",
+      "insn->code": "struct pointer_char"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "if-Condition",
+    "line_old": 93,
+    "critical_vars": [
+      "skb"
+    ],
+    "function": "*udp6_ufo_fragment",
+    "filename": "linux/CVE-2013-4563/CVE-2013-4563_CWE-189_0e033e04c2678dbbe74a46b23fffb7bb918c288e_udp_offload.c.diff",
+    "label": "True",
+    "function_code": "\nstatic struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb,\n\t\t\t\t\t netdev_features_t features)\n{\n\tstruct sk_buff *segs = ERR_PTR(-EINVAL);\n\tunsigned int mss;\n\tunsigned int unfrag_ip6hlen, unfrag_len;\n\tstruct frag_hdr *fptr;\n\tu8 *packet_start, *prevhdr;\n\tu8 nexthdr;\n\tu8 frag_hdr_sz = sizeof(struct frag_hdr);\n\tint offset;\n\t__wsum csum;\n\tint tnl_hlen;\n\n\tmss = skb_shinfo(skb)->gso_size;\n\tif (unlikely(skb->len <= mss))\n\t\tgoto out;\n\n\tif (skb_gso_ok(skb, features | NETIF_F_GSO_ROBUST)) {\n\t\t/* Packet is from an untrusted source, reset gso_segs. */\n\t\tint type = skb_shinfo(skb)->gso_type;\n\n\t\tif (unlikely(type & ~(SKB_GSO_UDP |\n\t\t\t\t      SKB_GSO_DODGY |\n\t\t\t\t      SKB_GSO_UDP_TUNNEL |\n\t\t\t\t      SKB_GSO_GRE |\n\t\t\t\t      SKB_GSO_IPIP |\n\t\t\t\t      SKB_GSO_SIT |\n\t\t\t\t      SKB_GSO_MPLS) ||\n\t\t\t     !(type & (SKB_GSO_UDP))))\n\t\t\tgoto out;\n\n\t\tskb_shinfo(skb)->gso_segs = DIV_ROUND_UP(skb->len, mss);\n\n\t\tsegs = NULL;\n\t\tgoto out;\n\t}\n\n\tif (skb->encapsulation && skb_shinfo(skb)->gso_type & SKB_GSO_UDP_TUNNEL)\n\t\tsegs = skb_udp_tunnel_segment(skb, features);\n\telse {\n\t\t/* Do software UFO. Complete and fill in the UDP checksum as HW cannot\n\t\t * do checksum of UDP packets sent as multiple IP fragments.\n\t\t */\n\t\toffset = skb_checksum_start_offset(skb);\n\t\tcsum = skb_checksum(skb, offset, skb->len - offset, 0);\n\t\toffset += skb->csum_offset;\n\t\t*(__sum16 *)(skb->data + offset) = csum_fold(csum);\n\t\tskb->ip_summed = CHECKSUM_NONE;\n\n\t\t/* Check if there is enough headroom to insert fragment header. */\n\t\ttnl_hlen = skb_tnl_header_len(skb);\n\t\tif (skb_headroom(skb) < (tnl_hlen + frag_hdr_sz)) {\n\t\t\tif (gso_pskb_expand_head(skb, tnl_hlen + frag_hdr_sz))\n\t\t\t\tgoto out;\n\t\t}\n\n\t\t/* Find the unfragmentable header and shift it left by frag_hdr_sz\n\t\t * bytes to insert fragment header.\n\t\t */\n\t\tunfrag_ip6hlen = ip6_find_1stfragopt(skb, &prevhdr);\n\t\tnexthdr = *prevhdr;\n\t\t*prevhdr = NEXTHDR_FRAGMENT;\n\t\tunfrag_len = (skb_network_header(skb) - skb_mac_header(skb)) +\n\t\t\t     unfrag_ip6hlen + tnl_hlen;\n\t\tpacket_start = (u8 *) skb->head + SKB_GSO_CB(skb)->mac_offset;\n\t\tmemmove(packet_start-frag_hdr_sz, packet_start, unfrag_len);\n\n\t\tSKB_GSO_CB(skb)->mac_offset -= frag_hdr_sz;\n\t\tskb->mac_header -= frag_hdr_sz;\n\t\tskb->network_header -= frag_hdr_sz;\n\n\t\tfptr = (struct frag_hdr *)(skb_network_header(skb) + unfrag_ip6hlen);\n\t\tfptr->nexthdr = nexthdr;\n\t\tfptr->reserved = 0;\n\t\tipv6_select_ident(fptr, (struct rt6_info *)skb_dst(skb));\n\n\t\t/* Fragment the skb. ipv6 header and the remaining fields of the\n\t\t * fragment header are updated in ipv6_gso_segment()\n\t\t */\n\t\tsegs = skb_segment(skb, features);\n\t}\n\nout:\n\treturn segs;\n}",
+    "variable_definitions": {
+      "skb": "struct sk_buff *skb"
+    },
+    "variable_types": {
+      "skb": "struct pointer"
+    },
+    "type_mapping": {
+      "skb": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 93,
+    "critical_vars": [
+      "skb->mac_header"
+    ],
+    "function": "*udp6_ufo_fragment",
+    "filename": "linux/CVE-2013-4563/CVE-2013-4563_CWE-189_0e033e04c2678dbbe74a46b23fffb7bb918c288e_udp_offload.c.diff",
+    "label": "False",
+    "function_code": "\nstatic struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb,\n\t\t\t\t\t netdev_features_t features)\n{\n\tstruct sk_buff *segs = ERR_PTR(-EINVAL);\n\tunsigned int mss;\n\tunsigned int unfrag_ip6hlen, unfrag_len;\n\tstruct frag_hdr *fptr;\n\tu8 *packet_start, *prevhdr;\n\tu8 nexthdr;\n\tu8 frag_hdr_sz = sizeof(struct frag_hdr);\n\tint offset;\n\t__wsum csum;\n\tint tnl_hlen;\n\n\tmss = skb_shinfo(skb)->gso_size;\n\tif (unlikely(skb->len <= mss))\n\t\tgoto out;\n\n\tif (skb_gso_ok(skb, features | NETIF_F_GSO_ROBUST)) {\n\t\t/* Packet is from an untrusted source, reset gso_segs. */\n\t\tint type = skb_shinfo(skb)->gso_type;\n\n\t\tif (unlikely(type & ~(SKB_GSO_UDP |\n\t\t\t\t      SKB_GSO_DODGY |\n\t\t\t\t      SKB_GSO_UDP_TUNNEL |\n\t\t\t\t      SKB_GSO_GRE |\n\t\t\t\t      SKB_GSO_IPIP |\n\t\t\t\t      SKB_GSO_SIT |\n\t\t\t\t      SKB_GSO_MPLS) ||\n\t\t\t     !(type & (SKB_GSO_UDP))))\n\t\t\tgoto out;\n\n\t\tskb_shinfo(skb)->gso_segs = DIV_ROUND_UP(skb->len, mss);\n\n\t\tsegs = NULL;\n\t\tgoto out;\n\t}\n\n\tif (skb->encapsulation && skb_shinfo(skb)->gso_type & SKB_GSO_UDP_TUNNEL)\n\t\tsegs = skb_udp_tunnel_segment(skb, features);\n\telse {\n\t\t/* Do software UFO. Complete and fill in the UDP checksum as HW cannot\n\t\t * do checksum of UDP packets sent as multiple IP fragments.\n\t\t */\n\t\toffset = skb_checksum_start_offset(skb);\n\t\tcsum = skb_checksum(skb, offset, skb->len - offset, 0);\n\t\toffset += skb->csum_offset;\n\t\t*(__sum16 *)(skb->data + offset) = csum_fold(csum);\n\t\tskb->ip_summed = CHECKSUM_NONE;\n\n\t\t/* Check if there is enough headroom to insert fragment header. */\n\t\ttnl_hlen = skb_tnl_header_len(skb);\n\t\tif (skb->mac_header < (tnl_hlen + frag_hdr_sz)) {\n\t\t\tif (gso_pskb_expand_head(skb, tnl_hlen + frag_hdr_sz))\n\t\t\t\tgoto out;\n\t\t}\n\n\t\t/* Find the unfragmentable header and shift it left by frag_hdr_sz\n\t\t * bytes to insert fragment header.\n\t\t */\n\t\tunfrag_ip6hlen = ip6_find_1stfragopt(skb, &prevhdr);\n\t\tnexthdr = *prevhdr;\n\t\t*prevhdr = NEXTHDR_FRAGMENT;\n\t\tunfrag_len = (skb_network_header(skb) - skb_mac_header(skb)) +\n\t\t\t     unfrag_ip6hlen + tnl_hlen;\n\t\tpacket_start = (u8 *) skb->head + SKB_GSO_CB(skb)->mac_offset;\n\t\tmemmove(packet_start-frag_hdr_sz, packet_start, unfrag_len);\n\n\t\tSKB_GSO_CB(skb)->mac_offset -= frag_hdr_sz;\n\t\tskb->mac_header -= frag_hdr_sz;\n\t\tskb->network_header -= frag_hdr_sz;\n\n\t\tfptr = (struct frag_hdr *)(skb_network_header(skb) + unfrag_ip6hlen);\n\t\tfptr->nexthdr = nexthdr;\n\t\tfptr->reserved = 0;\n\t\tipv6_select_ident(fptr, (struct rt6_info *)skb_dst(skb));\n\n\t\t/* Fragment the skb. ipv6 header and the remaining fields of the\n\t\t * fragment header are updated in ipv6_gso_segment()\n\t\t */\n\t\tsegs = skb_segment(skb, features);\n\t}\n\nout:\n\treturn segs;\n}",
+    "variable_definitions": {
+      "skb->mac_header": "Definition not found"
+    },
+    "variable_types": {
+      "skb->mac_header": "struct pointer_integer"
+    },
+    "type_mapping": {
+      "skb->mac_header": "sp_integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "if-Condition",
+    "line_old": 844,
+    "critical_vars": [
+      "apic"
+    ],
+    "function": "apic_get_tmcct",
+    "filename": "linux/CVE-2013-6367/CVE-2013-6367_CWE-189_b963a22e6d1a266a67e9eecc88134713fd54775c_lapic.c.diff",
+    "label": "True",
+    "function_code": "\nstatic u32 apic_get_tmcct(struct kvm_lapic *apic)\n{\n\tktime_t remaining;\n\ts64 ns;\n\tu32 tmcct;\n\n\tASSERT(apic != NULL);\n\n\t/* if initial count is 0, current count should also be 0 */\n\tif (kvm_apic_get_reg(apic, APIC_TMICT) == 0)\n\t\treturn 0;\n\n\tremaining = hrtimer_get_remaining(&apic->lapic_timer.timer);\n\tif (ktime_to_ns(remaining) < 0)\n\t\tremaining = ktime_set(0, 0);\n\n\tns = mod_64(ktime_to_ns(remaining), apic->lapic_timer.period);\n\ttmcct = div64_u64(ns,\n\t\t\t (APIC_BUS_CYCLE_NS * apic->divide_count));\n\n\treturn tmcct;\n}",
+    "variable_definitions": {
+      "apic": "struct kvm_lapic *apic"
+    },
+    "variable_types": {
+      "apic": "struct pointer"
+    },
+    "type_mapping": {
+      "apic": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 844,
+    "critical_vars": [
+      "apic->lapic_timer.period",
+      "apic"
+    ],
+    "function": "apic_get_tmcct",
+    "filename": "linux/CVE-2013-6367/CVE-2013-6367_CWE-189_b963a22e6d1a266a67e9eecc88134713fd54775c_lapic.c.diff",
+    "label": "False",
+    "function_code": "\nstatic u32 apic_get_tmcct(struct kvm_lapic *apic)\n{\n\tktime_t remaining;\n\ts64 ns;\n\tu32 tmcct;\n\n\tASSERT(apic != NULL);\n\n\t/* if initial count is 0, current count should also be 0 */\n\tif (kvm_apic_get_reg(apic, APIC_TMICT) == 0 ||\n\t\tapic->lapic_timer.period == 0)\n\t\treturn 0;\n\n\tremaining = hrtimer_get_remaining(&apic->lapic_timer.timer);\n\tif (ktime_to_ns(remaining) < 0)\n\t\tremaining = ktime_set(0, 0);\n\n\tns = mod_64(ktime_to_ns(remaining), apic->lapic_timer.period);\n\ttmcct = div64_u64(ns,\n\t\t\t (APIC_BUS_CYCLE_NS * apic->divide_count));\n\n\treturn tmcct;\n}",
+    "variable_definitions": {
+      "apic->lapic_timer.period": "Definition not found",
+      "apic": "struct kvm_lapic *apic"
+    },
+    "variable_types": {
+      "apic->lapic_timer.period": "struct pointer_integer",
+      "apic": "struct pointer"
+    },
+    "type_mapping": {
+      "apic->lapic_timer.period": "sp_integer",
+      "apic": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 2009,
+    "line_new": 2009,
+    "critical_vars": [
+      "groups_per_flex"
+    ],
+    "function": "ext4_fill_flex_info",
+    "filename": "linux/CVE-2012-2100/CVE-2012-2100_CWE-189_d50f2ab6f050311dbf7b8f5501b25f0bf64a439b_super.c.diff",
+    "label": "False",
+    "function_code": "\nstatic int ext4_fill_flex_info(struct super_block *sb)\n{\n\tstruct ext4_sb_info *sbi = EXT4_SB(sb);\n\tstruct ext4_group_desc *gdp = NULL;\n\text4_group_t flex_group_count;\n\text4_group_t flex_group;\n\tunsigned int groups_per_flex = 0;\n\tsize_t size;\n\tint i;\n\n\tsbi->s_log_groups_per_flex = sbi->s_es->s_log_groups_per_flex;\n\tif (sbi->s_log_groups_per_flex < 1 || sbi->s_log_groups_per_flex > 31) {\n\t\tsbi->s_log_groups_per_flex = 0;\n\t\treturn 1;\n\t}\n\tgroups_per_flex = 1 << sbi->s_log_groups_per_flex;\n\n\t/* We allocate both existing and potentially added groups */\n\tflex_group_count = ((sbi->s_groups_count + groups_per_flex - 1) +\n\t\t\t((le16_to_cpu(sbi->s_es->s_reserved_gdt_blocks) + 1) <<\n\t\t\t      EXT4_DESC_PER_BLOCK_BITS(sb))) / groups_per_flex;\n\tsize = flex_group_count * sizeof(struct flex_groups);\n\tsbi->s_flex_groups = ext4_kvzalloc(size, GFP_KERNEL);\n\tif (sbi->s_flex_groups == NULL) {\n\t\text4_msg(sb, KERN_ERR, \"not enough memory for %u flex groups\",\n\t\t\t flex_group_count);\n\t\tgoto failed;\n\t}\n\n\tfor (i = 0; i < sbi->s_groups_count; i++) {\n\t\tgdp = ext4_get_group_desc(sb, i, NULL);\n\n\t\tflex_group = ext4_flex_group(sbi, i);\n\t\tatomic_add(ext4_free_inodes_count(sb, gdp),\n\t\t\t   &sbi->s_flex_groups[flex_group].free_inodes);\n\t\tatomic_add(ext4_free_group_clusters(sb, gdp),\n\t\t\t   &sbi->s_flex_groups[flex_group].free_clusters);\n\t\tatomic_add(ext4_used_dirs_count(sb, gdp),\n\t\t\t   &sbi->s_flex_groups[flex_group].used_dirs);\n\t}\n\n\treturn 1;\nfailed:\n\treturn 0;\n}",
+    "variable_definitions": {
+      "groups_per_flex": "unsigned int groups_per_flex = 0;"
+    },
+    "variable_types": {
+      "groups_per_flex": "integer"
+    },
+    "type_mapping": {
+      "groups_per_flex": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 2014,
+    "critical_vars": [
+      "groups_per_flex"
+    ],
+    "function": "ext4_fill_flex_info",
+    "filename": "linux/CVE-2012-2100/CVE-2012-2100_CWE-189_d50f2ab6f050311dbf7b8f5501b25f0bf64a439b_super.c.diff",
+    "label": "True",
+    "function_code": "\nstatic int ext4_fill_flex_info(struct super_block *sb)\n{\n\tstruct ext4_sb_info *sbi = EXT4_SB(sb);\n\tstruct ext4_group_desc *gdp = NULL;\n\text4_group_t flex_group_count;\n\text4_group_t flex_group;\n\tint groups_per_flex = 0;\n\tsize_t size;\n\tint i;\n\n\tsbi->s_log_groups_per_flex = sbi->s_es->s_log_groups_per_flex;\n\tgroups_per_flex = 1 << sbi->s_log_groups_per_flex;\n\n\tif (groups_per_flex < 2) {\n\t\tsbi->s_log_groups_per_flex = 0;\n\t\treturn 1;\n\t}\n\n\t/* We allocate both existing and potentially added groups */\n\tflex_group_count = ((sbi->s_groups_count + groups_per_flex - 1) +\n\t\t\t((le16_to_cpu(sbi->s_es->s_reserved_gdt_blocks) + 1) <<\n\t\t\t      EXT4_DESC_PER_BLOCK_BITS(sb))) / groups_per_flex;\n\tsize = flex_group_count * sizeof(struct flex_groups);\n\tsbi->s_flex_groups = ext4_kvzalloc(size, GFP_KERNEL);\n\tif (sbi->s_flex_groups == NULL) {\n\t\text4_msg(sb, KERN_ERR, \"not enough memory for %u flex groups\",\n\t\t\t flex_group_count);\n\t\tgoto failed;\n\t}\n\n\tfor (i = 0; i < sbi->s_groups_count; i++) {\n\t\tgdp = ext4_get_group_desc(sb, i, NULL);\n\n\t\tflex_group = ext4_flex_group(sbi, i);\n\t\tatomic_add(ext4_free_inodes_count(sb, gdp),\n\t\t\t   &sbi->s_flex_groups[flex_group].free_inodes);\n\t\tatomic_add(ext4_free_group_clusters(sb, gdp),\n\t\t\t   &sbi->s_flex_groups[flex_group].free_clusters);\n\t\tatomic_add(ext4_used_dirs_count(sb, gdp),\n\t\t\t   &sbi->s_flex_groups[flex_group].used_dirs);\n\t}\n\n\treturn 1;\nfailed:\n\treturn 0;\n}",
+    "variable_definitions": {
+      "groups_per_flex": "int groups_per_flex = 0;"
+    },
+    "variable_types": {
+      "groups_per_flex": "integer"
+    },
+    "type_mapping": {
+      "groups_per_flex": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "if-Condition",
+    "line_old": 280,
+    "critical_vars": [
+      "vma->vm_flags"
+    ],
+    "function": "*vma_to_resize",
+    "filename": "linux/CVE-2011-2496/CVE-2011-2496_CWE-189_982134ba62618c2d69fbbbd166d0a11ee3b7e3d8_mremap.c.diff",
+    "label": "True",
+    "function_code": "\nstatic struct vm_area_struct *vma_to_resize(unsigned long addr,\n\tunsigned long old_len, unsigned long new_len, unsigned long *p)\n{\n\tstruct mm_struct *mm = current->mm;\n\tstruct vm_area_struct *vma = find_vma(mm, addr);\n\n\tif (!vma || vma->vm_start > addr)\n\t\tgoto Efault;\n\n\tif (is_vm_hugetlb_page(vma))\n\t\tgoto Einval;\n\n\t/* We can't remap across vm area boundaries */\n\tif (old_len > vma->vm_end - addr)\n\t\tgoto Efault;\n\n\tif (vma->vm_flags & (VM_DONTEXPAND | VM_PFNMAP)) {\n\t\tif (new_len > old_len)\n\t\t\tgoto Efault;\n\t}\n\n\tif (vma->vm_flags & VM_LOCKED) {\n\t\tunsigned long locked, lock_limit;\n\t\tlocked = mm->locked_vm << PAGE_SHIFT;\n\t\tlock_limit = rlimit(RLIMIT_MEMLOCK);\n\t\tlocked += new_len - old_len;\n\t\tif (locked > lock_limit && !capable(CAP_IPC_LOCK))\n\t\t\tgoto Eagain;\n\t}\n\n\tif (!may_expand_vm(mm, (new_len - old_len) >> PAGE_SHIFT))\n\t\tgoto Enomem;\n\n\tif (vma->vm_flags & VM_ACCOUNT) {\n\t\tunsigned long charged = (new_len - old_len) >> PAGE_SHIFT;\n\t\tif (security_vm_enough_memory(charged))\n\t\t\tgoto Efault;\n\t\t*p = charged;\n\t}\n\n\treturn vma;\n\nEfault:\t/* very odd choice for most of the cases, but... */\n\treturn ERR_PTR(-EFAULT);\nEinval:\n\treturn ERR_PTR(-EINVAL);\nEnomem:\n\treturn ERR_PTR(-ENOMEM);\nEagain:\n\treturn ERR_PTR(-EAGAIN);\n}\n\nstatic unsigned long mremap_to(unsigned long addr,\n\tunsigned long old_len, unsigned long new_addr,\n\tunsigned long new_len)\n{\n\tstruct mm_struct *mm = current->mm;\n\tstruct vm_area_struct *vma;\n\tunsigned long ret = -EINVAL;\n\tunsigned long charged = 0;\n\tunsigned long map_flags;\n\n\tif (new_addr & ~PAGE_MASK)\n\t\tgoto out;\n\n\tif (new_len > TASK_SIZE || new_addr > TASK_SIZE - new_len)\n\t\tgoto out;\n\n\t/* Check if the location we're moving into overlaps the\n\t * old location at all, and fail if it does.\n\t */\n\tif ((new_addr <= addr) && (new_addr+new_len) > addr)\n\t\tgoto out;\n\n\tif ((addr <= new_addr) && (addr+old_len) > new_addr)\n\t\tgoto out;\n\n\tret = security_file_mmap(NULL, 0, 0, 0, new_addr, 1);\n\tif (ret)\n\t\tgoto out;\n\n\tret = do_munmap(mm, new_addr, new_len);\n\tif (ret)\n\t\tgoto out;\n\n\tif (old_len >= new_len) {\n\t\tret = do_munmap(mm, addr+new_len, old_len - new_len);\n\t\tif (ret && old_len != new_len)\n\t\t\tgoto out;\n\t\told_len = new_len;\n\t}\n\n\tvma = vma_to_resize(addr, old_len, new_len, &charged);\n\tif (IS_ERR(vma)) {\n\t\tret = PTR_ERR(vma);\n\t\tgoto out;\n\t}\n\n\tmap_flags = MAP_FIXED;\n\tif (vma->vm_flags & VM_MAYSHARE)\n\t\tmap_flags |= MAP_SHARED;\n\n\tret = get_unmapped_area(vma->vm_file, new_addr, new_len, vma->vm_pgoff +\n\t\t\t\t((addr - vma->vm_start) >> PAGE_SHIFT),\n\t\t\t\tmap_flags);\n\tif (ret & ~PAGE_MASK)\n\t\tgoto out1;\n\n\tret = move_vma(vma, addr, old_len, new_len, new_addr);\n\tif (!(ret & ~PAGE_MASK))\n\t\tgoto out;\nout1:\n\tvm_unacct_memory(charged);\n\nout:\n\treturn ret;\n}",
+    "variable_definitions": {
+      "vma->vm_flags": "Definition not found"
+    },
+    "variable_types": {
+      "vma->vm_flags": "struct pointer_integer"
+    },
+    "type_mapping": {
+      "vma->vm_flags": "sp_integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 281,
+    "critical_vars": [
+      "new_len"
+    ],
+    "function": "*vma_to_resize",
+    "filename": "linux/CVE-2011-2496/CVE-2011-2496_CWE-189_982134ba62618c2d69fbbbd166d0a11ee3b7e3d8_mremap.c.diff",
+    "label": "False",
+    "function_code": "\nstatic struct vm_area_struct *vma_to_resize(unsigned long addr,\n\tunsigned long old_len, unsigned long new_len, unsigned long *p)\n{\n\tstruct mm_struct *mm = current->mm;\n\tstruct vm_area_struct *vma = find_vma(mm, addr);\n\n\tif (!vma || vma->vm_start > addr)\n\t\tgoto Efault;\n\n\tif (is_vm_hugetlb_page(vma))\n\t\tgoto Einval;\n\n\t/* We can't remap across vm area boundaries */\n\tif (old_len > vma->vm_end - addr)\n\t\tgoto Efault;\n\n\t/* Need to be careful about a growing mapping */\n\tif (new_len > old_len) {\n\t\tunsigned long pgoff;\n\n\t\tif (vma->vm_flags & (VM_DONTEXPAND | VM_PFNMAP))\n\t\t\tgoto Efault;\n\t\tpgoff = (addr - vma->vm_start) >> PAGE_SHIFT;\n\t\tpgoff += vma->vm_pgoff;\n\t\tif (pgoff + (new_len >> PAGE_SHIFT) < pgoff)\n\t\t\tgoto Einval;\n\t}\n\n\tif (vma->vm_flags & VM_LOCKED) {\n\t\tunsigned long locked, lock_limit;\n\t\tlocked = mm->locked_vm << PAGE_SHIFT;\n\t\tlock_limit = rlimit(RLIMIT_MEMLOCK);\n\t\tlocked += new_len - old_len;\n\t\tif (locked > lock_limit && !capable(CAP_IPC_LOCK))\n\t\t\tgoto Eagain;\n\t}\n\n\tif (!may_expand_vm(mm, (new_len - old_len) >> PAGE_SHIFT))\n\t\tgoto Enomem;\n\n\tif (vma->vm_flags & VM_ACCOUNT) {\n\t\tunsigned long charged = (new_len - old_len) >> PAGE_SHIFT;\n\t\tif (security_vm_enough_memory(charged))\n\t\t\tgoto Efault;\n\t\t*p = charged;\n\t}\n\n\treturn vma;\n\nEfault:\t/* very odd choice for most of the cases, but... */\n\treturn ERR_PTR(-EFAULT);\nEinval:\n\treturn ERR_PTR(-EINVAL);\nEnomem:\n\treturn ERR_PTR(-ENOMEM);\nEagain:\n\treturn ERR_PTR(-EAGAIN);\n}\n\nstatic unsigned long mremap_to(unsigned long addr,\n\tunsigned long old_len, unsigned long new_addr,\n\tunsigned long new_len)\n{\n\tstruct mm_struct *mm = current->mm;\n\tstruct vm_area_struct *vma;\n\tunsigned long ret = -EINVAL;\n\tunsigned long charged = 0;\n\tunsigned long map_flags;\n\n\tif (new_addr & ~PAGE_MASK)\n\t\tgoto out;\n\n\tif (new_len > TASK_SIZE || new_addr > TASK_SIZE - new_len)\n\t\tgoto out;\n\n\t/* Check if the location we're moving into overlaps the\n\t * old location at all, and fail if it does.\n\t */\n\tif ((new_addr <= addr) && (new_addr+new_len) > addr)\n\t\tgoto out;\n\n\tif ((addr <= new_addr) && (addr+old_len) > new_addr)\n\t\tgoto out;\n\n\tret = security_file_mmap(NULL, 0, 0, 0, new_addr, 1);\n\tif (ret)\n\t\tgoto out;\n\n\tret = do_munmap(mm, new_addr, new_len);\n\tif (ret)\n\t\tgoto out;\n\n\tif (old_len >= new_len) {\n\t\tret = do_munmap(mm, addr+new_len, old_len - new_len);\n\t\tif (ret && old_len != new_len)\n\t\t\tgoto out;\n\t\told_len = new_len;\n\t}\n\n\tvma = vma_to_resize(addr, old_len, new_len, &charged);\n\tif (IS_ERR(vma)) {\n\t\tret = PTR_ERR(vma);\n\t\tgoto out;\n\t}\n\n\tmap_flags = MAP_FIXED;\n\tif (vma->vm_flags & VM_MAYSHARE)\n\t\tmap_flags |= MAP_SHARED;\n\n\tret = get_unmapped_area(vma->vm_file, new_addr, new_len, vma->vm_pgoff +\n\t\t\t\t((addr - vma->vm_start) >> PAGE_SHIFT),\n\t\t\t\tmap_flags);\n\tif (ret & ~PAGE_MASK)\n\t\tgoto out1;\n\n\tret = move_vma(vma, addr, old_len, new_len, new_addr);\n\tif (!(ret & ~PAGE_MASK))\n\t\tgoto out;\nout1:\n\tvm_unacct_memory(charged);\n\nout:\n\treturn ret;\n}",
+    "variable_definitions": {
+      "new_len": "unsigned long new_len"
+    },
+    "variable_types": {
+      "new_len": "integer"
+    },
+    "type_mapping": {
+      "new_len": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 329,
+    "critical_vars": [
+      "n"
+    ],
+    "function": "oz_usb_handle_ep_data",
+    "filename": "linux/CVE-2015-4003/CVE-2015-4003_CWE-189_04bf464a5dfd9ade0dda918e44366c2c61fce80b_ozusbsvc1.c.diff",
+    "label": "True",
+    "function_code": "static void oz_usb_handle_ep_data(struct oz_usb_ctx *usb_ctx,\n\tstruct oz_usb_hdr *usb_hdr, int len)\n{\n\tstruct oz_data *data_hdr = (struct oz_data *)usb_hdr;\n\n\tswitch (data_hdr->format) {\n\tcase OZ_DATA_F_MULTIPLE_FIXED: {\n\t\t\tstruct oz_multiple_fixed *body =\n\t\t\t\t(struct oz_multiple_fixed *)data_hdr;\n\t\t\tu8 *data = body->data;\n\t\t\tint n = (len - sizeof(struct oz_multiple_fixed)+1)\n\t\t\t\t/ body->unit_size;\n\t\t\twhile (n--) {\n\t\t\t\toz_hcd_data_ind(usb_ctx->hport, body->endpoint,\n\t\t\t\t\tdata, body->unit_size);\n\t\t\t\tdata += body->unit_size;\n\t\t\t}\n\t\t}\n\t\tbreak;\n\tcase OZ_DATA_F_ISOC_FIXED: {\n\t\t\tstruct oz_isoc_fixed *body =\n\t\t\t\t(struct oz_isoc_fixed *)data_hdr;\n\t\t\tint data_len = len-sizeof(struct oz_isoc_fixed)+1;\n\t\t\tint unit_size = body->unit_size;\n\t\t\tu8 *data = body->data;\n\t\t\tint count;\n\t\t\tint i;\n\n\t\t\tif (!unit_size)\n\t\t\t\tbreak;\n\t\t\tcount = data_len/unit_size;\n\t\t\tfor (i = 0; i < count; i++) {\n\t\t\t\toz_hcd_data_ind(usb_ctx->hport,\n\t\t\t\t\tbody->endpoint, data, unit_size);\n\t\t\t\tdata += unit_size;\n\t\t\t}\n\t\t}\n\t\tbreak;\n\t}\n\n}",
+    "variable_definitions": {
+      "n": "int n = (len - sizeof(struct oz_multiple_fixed)+1) / body->unit_size;"
+    },
+    "variable_types": {
+      "n": "integer"
+    },
+    "type_mapping": {
+      "n": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Var-Declaration",
+    "line_new": 329,
+    "critical_vars": [
+      "n"
+    ],
+    "function": "oz_usb_handle_ep_data",
+    "filename": "linux/CVE-2015-4003/CVE-2015-4003_CWE-189_04bf464a5dfd9ade0dda918e44366c2c61fce80b_ozusbsvc1.c.diff",
+    "label": "False",
+    "function_code": "static void oz_usb_handle_ep_data(struct oz_usb_ctx *usb_ctx,\n\tstruct oz_usb_hdr *usb_hdr, int len)\n{\n\tstruct oz_data *data_hdr = (struct oz_data *)usb_hdr;\n\n\tswitch (data_hdr->format) {\n\tcase OZ_DATA_F_MULTIPLE_FIXED: {\n\t\t\tstruct oz_multiple_fixed *body =\n\t\t\t\t(struct oz_multiple_fixed *)data_hdr;\n\t\t\tu8 *data = body->data;\n\t\t\tint n;\n\t\t\tif (!body->unit_size)\n\t\t\t\tbreak;\n\t\t\tn = (len - sizeof(struct oz_multiple_fixed)+1)\n\t\t\t\t/ body->unit_size;\n\t\t\twhile (n--) {\n\t\t\t\toz_hcd_data_ind(usb_ctx->hport, body->endpoint,\n\t\t\t\t\tdata, body->unit_size);\n\t\t\t\tdata += body->unit_size;\n\t\t\t}\n\t\t}\n\t\tbreak;\n\tcase OZ_DATA_F_ISOC_FIXED: {\n\t\t\tstruct oz_isoc_fixed *body =\n\t\t\t\t(struct oz_isoc_fixed *)data_hdr;\n\t\t\tint data_len = len-sizeof(struct oz_isoc_fixed)+1;\n\t\t\tint unit_size = body->unit_size;\n\t\t\tu8 *data = body->data;\n\t\t\tint count;\n\t\t\tint i;\n\n\t\t\tif (!unit_size)\n\t\t\t\tbreak;\n\t\t\tcount = data_len/unit_size;\n\t\t\tfor (i = 0; i < count; i++) {\n\t\t\t\toz_hcd_data_ind(usb_ctx->hport,\n\t\t\t\t\tbody->endpoint, data, unit_size);\n\t\t\t\tdata += unit_size;\n\t\t\t}\n\t\t}\n\t\tbreak;\n\t}\n\n}",
+    "variable_definitions": {
+      "n": "int n;"
+    },
+    "variable_types": {
+      "n": "integer"
+    },
+    "type_mapping": {
+      "n": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 375,
+    "critical_vars": [
+      "buffer"
+    ],
+    "function": "chk_mem_check",
+    "filename": "platform_bionic/CVE-2012-2674/CVE-2012-2674_CWE-189_7f5aa4f35e23fd37425b3a5041737cdf58f87385_malloc_debug_leak.c.diff",
+    "label": "True",
+    "function_code": "static int chk_mem_check(void*       mem,\n                         size_t*     allocated,\n                         const char* func)\n{\n    char*  buffer;\n    size_t offset, bytes;\n    int    i;\n    char*  buf;\n\n    /* first check the bytes in the sentinel header */\n    buf = (char*)mem - CHK_SENTINEL_HEAD_SIZE;\n    for (i=0 ; i<CHK_SENTINEL_HEAD_SIZE ; i++) {\n        if (buf[i] != CHK_SENTINEL_VALUE) {\n            assert_log_message(\n                \"*** %s CHECK: buffer %p \"\n                \"corrupted %d bytes before allocation\",\n                func, mem, CHK_SENTINEL_HEAD_SIZE-i);\n            return -1;\n        }\n    }\n\n    /* then the ones in the sentinel trailer */\n    buffer = (char*)mem - CHK_SENTINEL_HEAD_SIZE;\n    offset = dlmalloc_usable_size(buffer) - sizeof(size_t);\n    bytes  = *(size_t *)(buffer + offset);\n\n    buf = (char*)mem + bytes;\n    for (i=CHK_SENTINEL_TAIL_SIZE-1 ; i>=0 ; i--) {\n        if (buf[i] != CHK_SENTINEL_VALUE) {\n            assert_log_message(\n                \"*** %s CHECK: buffer %p, size=%lu, \"\n                \"corrupted %d bytes after allocation\",\n                func, buffer, bytes, i+1);\n            return -1;\n        }\n    }\n\n    *allocated = bytes;\n    return 0;\n}",
+    "variable_definitions": {
+      "buffer": "char*  buffer;"
+    },
+    "variable_types": {
+      "buffer": "char pointer"
+    },
+    "type_mapping": {
+      "buffer": "char pointer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 508,
+    "critical_vars": [
+      "base"
+    ],
+    "function": "leak_malloc",
+    "filename": "platform_bionic/CVE-2012-2674/CVE-2012-2674_CWE-189_7f5aa4f35e23fd37425b3a5041737cdf58f87385_malloc_debug_leak.c.diff",
+    "label": "True",
+    "function_code": "\nvoid* leak_malloc(size_t bytes)\n{\n    // allocate enough space infront of the allocation to store the pointer for\n    // the alloc structure. This will making free'ing the structer really fast!\n\n    // 1. allocate enough memory and include our header\n    // 2. set the base pointer to be right after our header\n\n    void* base = dlmalloc(bytes + sizeof(AllocationEntry));\n    if (base != NULL) {\n        pthread_mutex_lock(&gAllocationsMutex);\n\n            intptr_t backtrace[BACKTRACE_SIZE];\n            size_t numEntries = get_backtrace(backtrace, BACKTRACE_SIZE);\n\n            AllocationEntry* header = (AllocationEntry*)base;\n            header->entry = record_backtrace(backtrace, numEntries, bytes);\n            header->guard = GUARD;\n\n            // now increment base to point to after our header.\n            // this should just work since our header is 8 bytes.\n            base = (AllocationEntry*)base + 1;\n\n        pthread_mutex_unlock(&gAllocationsMutex);\n    }\n\n    return base;\n}\n\nvoid leak_free(void* mem)\n{\n    if (mem != NULL) {\n        pthread_mutex_lock(&gAllocationsMutex);\n\n        // check the guard to make sure it is valid\n        AllocationEntry* header = (AllocationEntry*)mem - 1;\n\n        if (header->guard != GUARD) {\n            // could be a memaligned block\n            if (((void**)mem)[-1] == MEMALIGN_GUARD) {\n                mem = ((void**)mem)[-2];\n                header = (AllocationEntry*)mem - 1;\n            }\n        }\n\n        if (header->guard == GUARD || is_valid_entry(header->entry)) {\n            // decrement the allocations\n            HashEntry* entry = header->entry;\n            entry->allocations--;\n            if (entry->allocations <= 0) {\n                remove_entry(entry);\n                dlfree(entry);\n            }\n\n            // now free the memory!\n            dlfree(header);\n        } else {\n            debug_log(\"WARNING bad header guard: '0x%x'! and invalid entry: %p\\n\",\n                    header->guard, header->entry);\n        }\n\n        pthread_mutex_unlock(&gAllocationsMutex);\n    }\n}\n\nvoid* leak_calloc(size_t n_elements, size_t elem_size)\n{\n    size_t  size;\n    void*   ptr;\n\n    /* Fail on overflow - just to be safe even though this code runs only\n     * within the debugging C library, not the production one */\n    if (n_elements && MAX_SIZE_T / n_elements < elem_size) {\n        return NULL;\n    }\n    size = n_elements * elem_size;\n    ptr  = leak_malloc(size);\n    if (ptr != NULL) {\n        memset(ptr, 0, size);\n    }\n    return ptr;\n}\n\nvoid* leak_realloc(void* oldMem, size_t bytes)\n{\n    if (oldMem == NULL) {\n        return leak_malloc(bytes);\n    }\n    void* newMem = NULL;\n    AllocationEntry* header = (AllocationEntry*)oldMem - 1;\n    if (header && header->guard == GUARD) {\n        size_t oldSize = header->entry->size & ~SIZE_FLAG_MASK;\n        newMem = leak_malloc(bytes);\n        if (newMem != NULL) {\n            size_t copySize = (oldSize <= bytes) ? oldSize : bytes;\n            memcpy(newMem, oldMem, copySize);\n            leak_free(oldMem);\n        }\n    } else {\n        newMem = dlrealloc(oldMem, bytes);\n    }\n    return newMem;\n}\n\nvoid* leak_memalign(size_t alignment, size_t bytes)\n{\n    // we can just use malloc\n    if (alignment <= MALLOC_ALIGNMENT)\n        return leak_malloc(bytes);\n\n    // need to make sure it's a power of two\n    if (alignment & (alignment-1))\n        alignment = 1L << (31 - __builtin_clz(alignment));\n\n    // here, aligment is at least MALLOC_ALIGNMENT<<1 bytes\n    // we will align by at least MALLOC_ALIGNMENT bytes\n    // and at most alignment-MALLOC_ALIGNMENT bytes\n    size_t size = (alignment-MALLOC_ALIGNMENT) + bytes;\n    void* base = leak_malloc(size);\n    if (base != NULL) {\n        intptr_t ptr = (intptr_t)base;\n        if ((ptr % alignment) == 0)\n            return base;\n\n        // align the pointer\n        ptr += ((-ptr) % alignment);\n\n        // there is always enough space for the base pointer and the guard\n        ((void**)ptr)[-1] = MEMALIGN_GUARD;\n        ((void**)ptr)[-2] = base;\n\n        return (void*)ptr;\n    }\n    return base;\n}",
+    "variable_definitions": {
+      "base": "void* base = dlmalloc(bytes + sizeof(AllocationEntry));"
+    },
+    "variable_types": {
+      "base": "unknown"
+    },
+    "type_mapping": {
+      "base": "unknown"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Assignment",
+    "line_new": 512,
+    "critical_vars": [
+      "size"
+    ],
+    "function": "leak_malloc",
+    "filename": "platform_bionic/CVE-2012-2674/CVE-2012-2674_CWE-189_7f5aa4f35e23fd37425b3a5041737cdf58f87385_malloc_debug_leak.c.diff",
+    "label": "False",
+    "function_code": "\nvoid* leak_malloc(size_t bytes)\n{\n    // allocate enough space infront of the allocation to store the pointer for\n    // the alloc structure. This will making free'ing the structer really fast!\n\n    // 1. allocate enough memory and include our header\n    // 2. set the base pointer to be right after our header\n\n    size_t size = bytes + sizeof(AllocationEntry);\n    if (size < bytes) { // Overflow.\n        return NULL;\n    }\n\n    void* base = dlmalloc(size);\n    if (base != NULL) {\n        pthread_mutex_lock(&gAllocationsMutex);\n\n            intptr_t backtrace[BACKTRACE_SIZE];\n            size_t numEntries = get_backtrace(backtrace, BACKTRACE_SIZE);\n\n            AllocationEntry* header = (AllocationEntry*)base;\n            header->entry = record_backtrace(backtrace, numEntries, bytes);\n            header->guard = GUARD;\n\n            // now increment base to point to after our header.\n            // this should just work since our header is 8 bytes.\n            base = (AllocationEntry*)base + 1;\n\n        pthread_mutex_unlock(&gAllocationsMutex);\n    }\n\n    return base;\n}\n\nvoid leak_free(void* mem)\n{\n    if (mem != NULL) {\n        pthread_mutex_lock(&gAllocationsMutex);\n\n        // check the guard to make sure it is valid\n        AllocationEntry* header = (AllocationEntry*)mem - 1;\n\n        if (header->guard != GUARD) {\n            // could be a memaligned block\n            if (((void**)mem)[-1] == MEMALIGN_GUARD) {\n                mem = ((void**)mem)[-2];\n                header = (AllocationEntry*)mem - 1;\n            }\n        }\n\n        if (header->guard == GUARD || is_valid_entry(header->entry)) {\n            // decrement the allocations\n            HashEntry* entry = header->entry;\n            entry->allocations--;\n            if (entry->allocations <= 0) {\n                remove_entry(entry);\n                dlfree(entry);\n            }\n\n            // now free the memory!\n            dlfree(header);\n        } else {\n            debug_log(\"WARNING bad header guard: '0x%x'! and invalid entry: %p\\n\",\n                    header->guard, header->entry);\n        }\n\n        pthread_mutex_unlock(&gAllocationsMutex);\n    }\n}\n\nvoid* leak_calloc(size_t n_elements, size_t elem_size)\n{\n    size_t  size;\n    void*   ptr;\n\n    /* Fail on overflow - just to be safe even though this code runs only\n     * within the debugging C library, not the production one */\n    if (n_elements && MAX_SIZE_T / n_elements < elem_size) {\n        return NULL;\n    }\n    size = n_elements * elem_size;\n    ptr  = leak_malloc(size);\n    if (ptr != NULL) {\n        memset(ptr, 0, size);\n    }\n    return ptr;\n}\n\nvoid* leak_realloc(void* oldMem, size_t bytes)\n{\n    if (oldMem == NULL) {\n        return leak_malloc(bytes);\n    }\n    void* newMem = NULL;\n    AllocationEntry* header = (AllocationEntry*)oldMem - 1;\n    if (header && header->guard == GUARD) {\n        size_t oldSize = header->entry->size & ~SIZE_FLAG_MASK;\n        newMem = leak_malloc(bytes);\n        if (newMem != NULL) {\n            size_t copySize = (oldSize <= bytes) ? oldSize : bytes;\n            memcpy(newMem, oldMem, copySize);\n            leak_free(oldMem);\n        }\n    } else {\n        newMem = dlrealloc(oldMem, bytes);\n    }\n    return newMem;\n}\n\nvoid* leak_memalign(size_t alignment, size_t bytes)\n{\n    // we can just use malloc\n    if (alignment <= MALLOC_ALIGNMENT)\n        return leak_malloc(bytes);\n\n    // need to make sure it's a power of two\n    if (alignment & (alignment-1))\n        alignment = 1L << (31 - __builtin_clz(alignment));\n\n    // here, aligment is at least MALLOC_ALIGNMENT<<1 bytes\n    // we will align by at least MALLOC_ALIGNMENT bytes\n    // and at most alignment-MALLOC_ALIGNMENT bytes\n    size_t size = (alignment-MALLOC_ALIGNMENT) + bytes;\n    if (size < bytes) { // Overflow.\n        return NULL;\n    }\n\n    void* base = leak_malloc(size);\n    if (base != NULL) {\n        intptr_t ptr = (intptr_t)base;\n        if ((ptr % alignment) == 0)\n            return base;\n\n        // align the pointer\n        ptr += ((-ptr) % alignment);\n\n        // there is always enough space for the base pointer and the guard\n        ((void**)ptr)[-1] = MEMALIGN_GUARD;\n        ((void**)ptr)[-2] = base;\n\n        return (void*)ptr;\n    }\n    return base;\n}",
+    "variable_definitions": {
+      "size": "size_t size = bytes + sizeof(AllocationEntry);"
+    },
+    "variable_types": {
+      "size": "integer"
+    },
+    "type_mapping": {
+      "size": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 627,
+    "critical_vars": [
+      "size"
+    ],
+    "function": "leak_memalign",
+    "filename": "platform_bionic/CVE-2012-2674/CVE-2012-2674_CWE-189_7f5aa4f35e23fd37425b3a5041737cdf58f87385_malloc_debug_leak.c.diff",
+    "label": "False",
+    "function_code": "\nvoid* leak_memalign(size_t alignment, size_t bytes)\n{\n    // we can just use malloc\n    if (alignment <= MALLOC_ALIGNMENT)\n        return leak_malloc(bytes);\n\n    // need to make sure it's a power of two\n    if (alignment & (alignment-1))\n        alignment = 1L << (31 - __builtin_clz(alignment));\n\n    // here, aligment is at least MALLOC_ALIGNMENT<<1 bytes\n    // we will align by at least MALLOC_ALIGNMENT bytes\n    // and at most alignment-MALLOC_ALIGNMENT bytes\n    size_t size = (alignment-MALLOC_ALIGNMENT) + bytes;\n    if (size < bytes) { // Overflow.\n        return NULL;\n    }\n\n    void* base = leak_malloc(size);\n    if (base != NULL) {\n        intptr_t ptr = (intptr_t)base;\n        if ((ptr % alignment) == 0)\n            return base;\n\n        // align the pointer\n        ptr += ((-ptr) % alignment);\n\n        // there is always enough space for the base pointer and the guard\n        ((void**)ptr)[-1] = MEMALIGN_GUARD;\n        ((void**)ptr)[-2] = base;\n\n        return (void*)ptr;\n    }\n    return base;\n}\n\n/* Initializes malloc debugging framework.\n * See comments on MallocDebugInit in malloc_debug_common.h\n */\nint malloc_debug_initialize(void)\n{\n    // We don't really have anything that requires initialization here.\n    return 0;\n}",
+    "variable_definitions": {
+      "size": "size_t size = (alignment-MALLOC_ALIGNMENT) + bytes;"
+    },
+    "variable_types": {
+      "size": "integer"
+    },
+    "type_mapping": {
+      "size": "Integer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 256,
+    "line_new": 256,
+    "critical_vars": [
+      "cmd"
+    ],
+    "function": "*php_escape_shell_cmd",
+    "filename": "php-src/CVE-2016-1904/CVE-2016-1904_CWE-189_2871c70efaaaa0f102557a17c727fd4d5204dd4b_exec.c.diff",
+    "label": "False",
+    "function_code": "PHPAPI zend_string *php_escape_shell_cmd(char *str)\n{\n\tregister int x, y, l = (int)strlen(str);\n\tsize_t estimate = (2 * l) + 1;\n\tzend_string *cmd;\n#ifndef PHP_WIN32\n\tchar *p = NULL;\n#endif\n\n\n\tcmd = zend_string_safe_alloc(2, l, 0, 0);\n\n\tfor (x = 0, y = 0; x < l; x++) {\n\t\tint mb_len = php_mblen(str + x, (l - x));\n\n\t\t/* skip non-valid multibyte characters */\n\t\tif (mb_len < 0) {\n\t\t\tcontinue;\n\t\t} else if (mb_len > 1) {\n\t\t\tmemcpy(ZSTR_VAL(cmd) + y, str + x, mb_len);\n\t\t\ty += mb_len;\n\t\t\tx += mb_len - 1;\n\t\t\tcontinue;\n\t\t}\n\n\t\tswitch (str[x]) {\n#ifndef PHP_WIN32\n\t\t\tcase '\"':\n\t\t\tcase '\\'':\n\t\t\t\tif (!p && (p = memchr(str + x + 1, str[x], l - x - 1))) {\n\t\t\t\t\t/* noop */\n\t\t\t\t} else if (p && *p == str[x]) {\n\t\t\t\t\tp = NULL;\n\t\t\t\t} else {\n\t\t\t\t\tZSTR_VAL(cmd)[y++] = '\\\\';\n\t\t\t\t}\n\t\t\t\tZSTR_VAL(cmd)[y++] = str[x];\n\t\t\t\tbreak;\n#else\n\t\t\t/* % is Windows specific for environmental variables, ^%PATH% will \n\t\t\t\toutput PATH while ^%PATH^% will not. escapeshellcmd->val will escape all % and !.\n\t\t\t*/\n\t\t\tcase '%':\n\t\t\tcase '!':\n\t\t\tcase '\"':\n\t\t\tcase '\\'':\n#endif\n\t\t\tcase '#': /* This is character-set independent */\n\t\t\tcase '&':\n\t\t\tcase ';':\n\t\t\tcase '`':\n\t\t\tcase '|':\n\t\t\tcase '*':\n\t\t\tcase '?':\n\t\t\tcase '~':\n\t\t\tcase '<':\n\t\t\tcase '>':\n\t\t\tcase '^':\n\t\t\tcase '(':\n\t\t\tcase ')':\n\t\t\tcase '[':\n\t\t\tcase ']':\n\t\t\tcase '{':\n\t\t\tcase '}':\n\t\t\tcase '$':\n\t\t\tcase '\\\\':\n\t\t\tcase '\\x0A': /* excluding these two */\n\t\t\tcase '\\xFF':\n#ifdef PHP_WIN32\n\t\t\t\tZSTR_VAL(cmd)[y++] = '^';\n#else\n\t\t\t\tZSTR_VAL(cmd)[y++] = '\\\\';\n#endif\n\t\t\t\t/* fall-through */\n\t\t\tdefault:\n\t\t\t\tZSTR_VAL(cmd)[y++] = str[x];\n\n\t\t}\n\t}\n\tZSTR_VAL(cmd)[y] = '\\0';\n\n\tif ((estimate - y) > 4096) {\n\t\t/* realloc if the estimate was way overill\n\t\t * Arbitrary cutoff point of 4096 */\n\t\tcmd = zend_string_truncate(cmd, y, 0);\n\t}\n\n\tZSTR_LEN(cmd) = y;\n\n\treturn cmd;\n}",
+    "variable_definitions": {
+      "cmd": "zend_string *cmd;"
+    },
+    "variable_types": {
+      "cmd": "struct pointer"
+    },
+    "type_mapping": {
+      "cmd": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 348,
+    "line_new": 348,
+    "critical_vars": [
+      "cmd"
+    ],
+    "function": "*php_escape_shell_arg",
+    "filename": "php-src/CVE-2016-1904/CVE-2016-1904_CWE-189_2871c70efaaaa0f102557a17c727fd4d5204dd4b_exec.c.diff",
+    "label": "False",
+    "function_code": "PHPAPI zend_string *php_escape_shell_arg(char *str)\n{\n\tint x, y = 0, l = (int)strlen(str);\n\tzend_string *cmd;\n\tsize_t estimate = (4 * l) + 3;\n\n\n\tcmd = zend_string_safe_alloc(4, l, 2, 0); /* worst case */\n\n#ifdef PHP_WIN32\n\tZSTR_VAL(cmd)[y++] = '\"';\n#else\n\tZSTR_VAL(cmd)[y++] = '\\'';\n#endif\n\n\tfor (x = 0; x < l; x++) {\n\t\tint mb_len = php_mblen(str + x, (l - x));\n\n\t\t/* skip non-valid multibyte characters */\n\t\tif (mb_len < 0) {\n\t\t\tcontinue;\n\t\t} else if (mb_len > 1) {\n\t\t\tmemcpy(ZSTR_VAL(cmd) + y, str + x, mb_len);\n\t\t\ty += mb_len;\n\t\t\tx += mb_len - 1;\n\t\t\tcontinue;\n\t\t}\n\n\t\tswitch (str[x]) {\n#ifdef PHP_WIN32\n\t\tcase '\"':\n\t\tcase '%':\n\t\tcase '!':\n\t\t\tZSTR_VAL(cmd)[y++] = ' ';\n\t\t\tbreak;\n#else\n\t\tcase '\\'':\n\t\t\tZSTR_VAL(cmd)[y++] = '\\'';\n\t\t\tZSTR_VAL(cmd)[y++] = '\\\\';\n\t\t\tZSTR_VAL(cmd)[y++] = '\\'';\n#endif\n\t\t\t/* fall-through */\n\t\tdefault:\n\t\t\tZSTR_VAL(cmd)[y++] = str[x];\n\t\t}\n\t}\n#ifdef PHP_WIN32\n\tif (y > 0 && '\\\\' == ZSTR_VAL(cmd)[y - 1]) {\n\t\tint k = 0, n = y - 1;\n\t\tfor (; n >= 0 && '\\\\' == ZSTR_VAL(cmd)[n]; n--, k++);\n\t\tif (k % 2) {\n\t\t\tZSTR_VAL(cmd)[y++] = '\\\\';\n\t\t}\n\t}\n\n\tZSTR_VAL(cmd)[y++] = '\"';\n#else\n\tZSTR_VAL(cmd)[y++] = '\\'';\n#endif\n\tZSTR_VAL(cmd)[y] = '\\0';\n\n\tif ((estimate - y) > 4096) {\n\t\t/* realloc if the estimate was way overill\n\t\t * Arbitrary cutoff point of 4096 */\n\t\tcmd = zend_string_truncate(cmd, y, 0);\n\t}\n\tZSTR_LEN(cmd) = y;\n\treturn cmd;\n}",
+    "variable_definitions": {
+      "cmd": "zend_string *cmd;"
+    },
+    "variable_types": {
+      "cmd": "struct pointer"
+    },
+    "type_mapping": {
+      "cmd": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 172,
+    "critical_vars": [
+      "lb_rounded"
+    ],
+    "function": "GC_generic_malloc",
+    "filename": "bdwgc/CVE-2012-2673/CVE-2012-2673_CWE-189_be9df82919960214ee4b9d3313523bff44fd99e1_malloc.c.diff",
+    "label": "False",
+    "function_code": "\nGC_API void * GC_CALL GC_generic_malloc(size_t lb, int k)\n{\n    void * result;\n    DCL_LOCK_STATE;\n\n    if (EXPECT(GC_have_errors, FALSE))\n      GC_print_all_errors();\n    GC_INVOKE_FINALIZERS();\n    if (SMALL_OBJ(lb)) {\n        LOCK();\n        result = GC_generic_malloc_inner((word)lb, k);\n        UNLOCK();\n    } else {\n        size_t lg;\n        size_t lb_rounded;\n        word n_blocks;\n        GC_bool init;\n        lg = ROUNDED_UP_GRANULES(lb);\n        lb_rounded = GRANULES_TO_BYTES(lg);\n        if (lb_rounded < lb)\n            return((*GC_get_oom_fn())(lb));\n        n_blocks = OBJ_SZ_TO_BLOCKS(lb_rounded);\n        init = GC_obj_kinds[k].ok_init;\n        LOCK();\n        result = (ptr_t)GC_alloc_large(lb_rounded, k, 0);\n        if (0 != result) {\n          if (GC_debugging_started) {\n            BZERO(result, n_blocks * HBLKSIZE);\n          } else {\n#           ifdef THREADS\n              /* Clear any memory that might be used for GC descriptors */\n              /* before we release the lock.                            */\n                ((word *)result)[0] = 0;\n                ((word *)result)[1] = 0;\n                ((word *)result)[GRANULES_TO_WORDS(lg)-1] = 0;\n                ((word *)result)[GRANULES_TO_WORDS(lg)-2] = 0;\n#           endif\n          }\n        }\n        GC_bytes_allocd += lb_rounded;\n        UNLOCK();\n        if (init && !GC_debugging_started && 0 != result) {\n            BZERO(result, n_blocks * HBLKSIZE);\n        }\n    }\n    if (0 == result) {\n        return((*GC_get_oom_fn())(lb));\n    } else {\n        return(result);\n    }\n}",
+    "variable_definitions": {
+      "lb_rounded": "size_t lb_rounded;"
+    },
+    "variable_types": {
+      "lb_rounded": "integer"
+    },
+    "type_mapping": {
+      "lb_rounded": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 185,
+    "critical_vars": [
+      "lb_rounded"
+    ],
+    "function": "GC_generic_malloc_ignore_off_page",
+    "filename": "bdwgc/CVE-2012-2673/CVE-2012-2673_CWE-189_be9df82919960214ee4b9d3313523bff44fd99e1_mallocx.c.diff",
+    "label": "False",
+    "function_code": "GC_INNER void * GC_generic_malloc_ignore_off_page(size_t lb, int k)\n{\n    void *result;\n    size_t lg;\n    size_t lb_rounded;\n    word n_blocks;\n    GC_bool init;\n    DCL_LOCK_STATE;\n\n    if (SMALL_OBJ(lb))\n        return(GC_generic_malloc((word)lb, k));\n    lg = ROUNDED_UP_GRANULES(lb);\n    lb_rounded = GRANULES_TO_BYTES(lg);\n    if (lb_rounded < lb)\n        return((*GC_get_oom_fn())(lb));\n    n_blocks = OBJ_SZ_TO_BLOCKS(lb_rounded);\n    init = GC_obj_kinds[k].ok_init;\n    if (EXPECT(GC_have_errors, FALSE))\n      GC_print_all_errors();\n    GC_INVOKE_FINALIZERS();\n    LOCK();\n    result = (ptr_t)GC_alloc_large(ADD_SLOP(lb), k, IGNORE_OFF_PAGE);\n    if (0 != result) {\n        if (GC_debugging_started) {\n            BZERO(result, n_blocks * HBLKSIZE);\n        } else {\n#           ifdef THREADS\n              /* Clear any memory that might be used for GC descriptors */\n              /* before we release the lock.                          */\n                ((word *)result)[0] = 0;\n                ((word *)result)[1] = 0;\n                ((word *)result)[GRANULES_TO_WORDS(lg)-1] = 0;\n                ((word *)result)[GRANULES_TO_WORDS(lg)-2] = 0;\n#           endif\n        }\n    }\n    GC_bytes_allocd += lb_rounded;\n    if (0 == result) {\n        GC_oom_func oom_fn = GC_oom_fn;\n        UNLOCK();\n        return((*oom_fn)(lb));\n    } else {\n        UNLOCK();\n        if (init && !GC_debugging_started) {\n            BZERO(result, n_blocks * HBLKSIZE);\n        }\n        return(result);\n    }\n}",
+    "variable_definitions": {
+      "lb_rounded": "size_t lb_rounded;"
+    },
+    "variable_types": {
+      "lb_rounded": "integer"
+    },
+    "type_mapping": {
+      "lb_rounded": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 509,
+    "critical_vars": [
+      "bits_left"
+    ],
+    "function": "lzxd_decompress",
+    "filename": "libmspack/CVE-2015-4471/CVE-2015-4471_CWE-189_18b6a2cc0b87536015bedd4f7763e6b02d5aa4f3_lzxd.c.diff",
+    "label": "False",
+    "function_code": "\nint lzxd_decompress(struct lzxd_stream *lzx, off_t out_bytes) {\n  /* bitstream and huffman reading variables */\n  register unsigned int bit_buffer;\n  register int bits_left, i=0;\n  unsigned char *i_ptr, *i_end;\n  register unsigned short sym;\n\n  int match_length, length_footer, extra, verbatim_bits, bytes_todo;\n  int this_run, main_element, aligned_bits, j;\n  unsigned char *window, *runsrc, *rundest, buf[12];\n  unsigned int frame_size=0, end_frame, match_offset, window_posn;\n  unsigned int R0, R1, R2;\n\n  /* easy answers */\n  if (!lzx || (out_bytes < 0)) return MSPACK_ERR_ARGS;\n  if (lzx->error) return lzx->error;\n\n  /* flush out any stored-up bytes before we begin */\n  i = lzx->o_end - lzx->o_ptr;\n  if ((off_t) i > out_bytes) i = (int) out_bytes;\n  if (i) {\n    if (lzx->sys->write(lzx->output, lzx->o_ptr, i) != i) {\n      return lzx->error = MSPACK_ERR_WRITE;\n    }\n    lzx->o_ptr  += i;\n    lzx->offset += i;\n    out_bytes   -= i;\n  }\n  if (out_bytes == 0) return MSPACK_ERR_OK;\n\n  /* restore local state */\n  RESTORE_BITS;\n  window = lzx->window;\n  window_posn = lzx->window_posn;\n  R0 = lzx->R0;\n  R1 = lzx->R1;\n  R2 = lzx->R2;\n\n  end_frame = (unsigned int)((lzx->offset + out_bytes) / LZX_FRAME_SIZE) + 1;\n\n  while (lzx->frame < end_frame) {\n    /* have we reached the reset interval? (if there is one?) */\n    if (lzx->reset_interval && ((lzx->frame % lzx->reset_interval) == 0)) {\n      if (lzx->block_remaining) {\n\tD((\"%d bytes remaining at reset interval\", lzx->block_remaining))\n\treturn lzx->error = MSPACK_ERR_DECRUNCH;\n      }\n\n      /* re-read the intel header and reset the huffman lengths */\n      lzxd_reset_state(lzx);\n      R0 = lzx->R0;\n      R1 = lzx->R1;\n      R2 = lzx->R2;\n    }\n\n    /* LZX DELTA format has chunk_size, not present in LZX format */\n    if (lzx->is_delta) {\n      ENSURE_BITS(16);\n      REMOVE_BITS(16);\n    }\n\n    /* read header if necessary */\n    if (!lzx->header_read) {\n      /* read 1 bit. if bit=0, intel filesize = 0.\n       * if bit=1, read \n... (function end not found)",
+    "variable_definitions": {
+      "bits_left": "register int bits_left, i=0;"
+    },
+    "variable_types": {
+      "bits_left": "integer"
+    },
+    "type_mapping": {
+      "bits_left": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "if-Condition",
+    "line_old": 510,
+    "critical_vars": [
+      "bits_left"
+    ],
+    "function": "lzxd_decompress",
+    "filename": "libmspack/CVE-2015-4471/CVE-2015-4471_CWE-189_18b6a2cc0b87536015bedd4f7763e6b02d5aa4f3_lzxd.c.diff",
+    "label": "True",
+    "function_code": "\nint lzxd_decompress(struct lzxd_stream *lzx, off_t out_bytes) {\n  /* bitstream and huffman reading variables */\n  register unsigned int bit_buffer;\n  register int bits_left, i=0;\n  unsigned char *i_ptr, *i_end;\n  register unsigned short sym;\n\n  int match_length, length_footer, extra, verbatim_bits, bytes_todo;\n  int this_run, main_element, aligned_bits, j;\n  unsigned char *window, *runsrc, *rundest, buf[12];\n  unsigned int frame_size=0, end_frame, match_offset, window_posn;\n  unsigned int R0, R1, R2;\n\n  /* easy answers */\n  if (!lzx || (out_bytes < 0)) return MSPACK_ERR_ARGS;\n  if (lzx->error) return lzx->error;\n\n  /* flush out any stored-up bytes before we begin */\n  i = lzx->o_end - lzx->o_ptr;\n  if ((off_t) i > out_bytes) i = (int) out_bytes;\n  if (i) {\n    if (lzx->sys->write(lzx->output, lzx->o_ptr, i) != i) {\n      return lzx->error = MSPACK_ERR_WRITE;\n    }\n    lzx->o_ptr  += i;\n    lzx->offset += i;\n    out_bytes   -= i;\n  }\n  if (out_bytes == 0) return MSPACK_ERR_OK;\n\n  /* restore local state */\n  RESTORE_BITS;\n  window = lzx->window;\n  window_posn = lzx->window_posn;\n  R0 = lzx->R0;\n  R1 = lzx->R1;\n  R2 = lzx->R2;\n\n  end_frame = (unsigned int)((lzx->offset + out_bytes) / LZX_FRAME_SIZE) + 1;\n\n  while (lzx->frame < end_frame) {\n    /* have we reached the reset interval? (if there is one?) */\n    if (lzx->reset_interval && ((lzx->frame % lzx->reset_interval) == 0)) {\n      if (lzx->block_remaining) {\n\tD((\"%d bytes remaining at reset interval\", lzx->block_remaining))\n\treturn lzx->error = MSPACK_ERR_DECRUNCH;\n      }\n\n      /* re-read the intel header and reset the huffman lengths */\n      lzxd_reset_state(lzx);\n      R0 = lzx->R0;\n      R1 = lzx->R1;\n      R2 = lzx->R2;\n    }\n\n    /* LZX DELTA format has chunk_size, not present in LZX format */\n    if (lzx->is_delta) {\n      ENSURE_BITS(16);\n      REMOVE_BITS(16);\n    }\n\n    /* read header if necessary */\n    if (!lzx->header_read) {\n      /* read 1 bit. if bit=0, intel filesize = 0.\n       * if bit=1, read \n... (function end not found)",
+    "variable_definitions": {
+      "bits_left": "register int bits_left, i=0;"
+    },
+    "variable_types": {
+      "bits_left": "integer"
+    },
+    "type_mapping": {
+      "bits_left": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Fun-Call",
+    "line_old": 201,
+    "critical_vars": [
+      "mobj",
+      "size"
+    ],
+    "function": "*alloc_ta_mem",
+    "filename": "optee_os/CVE-2019-1010294/CVE-2019-1010294_CWE-189_7e768f8a473409215fe3fff8f6e31f8a3a0103c6_user_ta.c.diff",
+    "label": "True",
+    "function_code": "\nstatic struct mobj *alloc_ta_mem(size_t size)\n{\n#ifdef CFG_PAGED_USER_TA\n\treturn mobj_paged_alloc(size);\n#else\n\tstruct mobj *mobj = mobj_mm_alloc(mobj_sec_ddr, size, &tee_mm_sec_ddr);\n\n\tif (mobj)\n\t\tmemset(mobj_get_va(mobj, 0), 0, size);\n\treturn mobj;\n#endif\n}",
+    "variable_definitions": {
+      "mobj": "struct mobj *mobj = mobj_mm_alloc(mobj_sec_ddr, size, &tee_mm_sec_ddr);",
+      "size": "size_t size"
+    },
+    "variable_types": {
+      "mobj": "struct pointer",
+      "size": "integer"
+    },
+    "type_mapping": {
+      "mobj": "struct pointer",
+      "size": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Assignment",
+    "line_new": 201,
+    "critical_vars": [
+      "granularity"
+    ],
+    "function": "*alloc_ta_mem",
+    "filename": "optee_os/CVE-2019-1010294/CVE-2019-1010294_CWE-189_7e768f8a473409215fe3fff8f6e31f8a3a0103c6_user_ta.c.diff",
+    "label": "False",
+    "function_code": "\nstatic struct mobj *alloc_ta_mem(size_t size)\n{\n#ifdef CFG_PAGED_USER_TA\n\treturn mobj_paged_alloc(size);\n#else\n\tstruct mobj *mobj = mobj_mm_alloc(mobj_sec_ddr, size, &tee_mm_sec_ddr);\n\n\tif (mobj) {\n\t\tsize_t granularity = BIT(tee_mm_sec_ddr.shift);\n\n\t\t/* Round up to allocation granularity size */\n\t\tmemset(mobj_get_va(mobj, 0), 0, ROUNDUP(size, granularity));\n\t}\n\treturn mobj;\n#endif\n}",
+    "variable_definitions": {
+      "granularity": "size_t granularity = BIT(tee_mm_sec_ddr.shift);"
+    },
+    "variable_types": {
+      "granularity": "integer"
+    },
+    "type_mapping": {
+      "granularity": "Integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Assignment",
+    "line_old": 629,
+    "critical_vars": [
+      "out_len"
+    ],
+    "function": "string_chunk_split",
+    "filename": "hhvm/CVE-2014-6228/CVE-2014-6228_CWE-189_1f91e076a585118495b976a413c1df40f6fd3d41_zend-string.cpp.diff",
+    "label": "True",
+    "function_code": "\nString string_chunk_split(const char *src, int srclen, const char *end,\n                          int endlen, int chunklen) {\n  int chunks = srclen / chunklen; // complete chunks!\n  int restlen = srclen - chunks * chunklen; /* srclen % chunklen */\n\n  int out_len = (chunks + 1) * endlen + srclen;\n  String ret(out_len, ReserveString);\n  char *dest = ret.bufferSlice().ptr;\n\n  const char *p; char *q;\n  const char *pMax = src + srclen - chunklen + 1;\n  for (p = src, q = dest; p < pMax; ) {\n    memcpy(q, p, chunklen);\n    q += chunklen;\n    memcpy(q, end, endlen);\n    q += endlen;\n    p += chunklen;\n  }\n\n  if (restlen) {\n    memcpy(q, p, restlen);\n    q += restlen;\n    memcpy(q, end, endlen);\n    q += endlen;\n  }\n\n  ret.setSize(q - dest);\n  return ret;\n}",
+    "variable_definitions": {
+      "out_len": "int out_len = (chunks + 1) * endlen + srclen;"
+    },
+    "variable_types": {
+      "out_len": "integer"
+    },
+    "type_mapping": {
+      "out_len": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "Fun-Call",
+    "line_new": 629,
+    "critical_vars": [
+      "ReserveString",
+      "endlen",
+      "chunks",
+      "srclen"
+    ],
+    "function": "string_chunk_split",
+    "filename": "hhvm/CVE-2014-6228/CVE-2014-6228_CWE-189_1f91e076a585118495b976a413c1df40f6fd3d41_zend-string.cpp.diff",
+    "label": "False",
+    "function_code": "\nString string_chunk_split(const char *src, int srclen, const char *end,\n                          int endlen, int chunklen) {\n  int chunks = srclen / chunklen; // complete chunks!\n  int restlen = srclen - chunks * chunklen; /* srclen % chunklen */\n\n  String ret(\n    safe_address(\n      chunks + 1,\n      endlen,\n      srclen\n    ),\n    ReserveString\n  );\n  char *dest = ret.bufferSlice().ptr;\n\n  const char *p; char *q;\n  const char *pMax = src + srclen - chunklen + 1;\n  for (p = src, q = dest; p < pMax; ) {\n    memcpy(q, p, chunklen);\n    q += chunklen;\n    memcpy(q, end, endlen);\n    q += endlen;\n    p += chunklen;\n  }\n\n  if (restlen) {\n    memcpy(q, p, restlen);\n    q += restlen;\n    memcpy(q, end, endlen);\n    q += endlen;\n  }\n\n  ret.setSize(q - dest);\n  return ret;\n}",
+    "variable_definitions": {
+      "ReserveString": "Definition not found",
+      "endlen": "int endlen",
+      "chunks": "int chunks = srclen / chunklen; // complete chunks!",
+      "srclen": "int srclen"
+    },
+    "variable_types": {
+      "ReserveString": "struct",
+      "endlen": "integer",
+      "chunks": "integer",
+      "srclen": "integer"
+    },
+    "type_mapping": {
+      "ReserveString": "struct",
+      "endlen": "Integer",
+      "chunks": "Integer",
+      "srclen": "Integer"
+    }
+  },
+  {
+    "patch_model": "Add",
+    "change_type": "if-Condition",
+    "line_new": 673,
+    "critical_vars": [
+      "s"
+    ],
+    "function": "license_read_scope_list",
+    "filename": "FreeRDP/CVE-2014-0791/CVE-2014-0791_CWE-189_e2745807c4c3e0a590c0f69a9b655dc74ebaa03e_license.c.diff",
+    "label": "False",
+    "function_code": "\nBOOL license_read_scope_list(wStream* s, SCOPE_LIST* scopeList)\n{\n\tUINT32 i;\n\tUINT32 scopeCount;\n\n\tif (Stream_GetRemainingLength(s) < 4)\n\t\treturn FALSE;\n\n\tStream_Read_UINT32(s, scopeCount); /* ScopeCount (4 bytes) */\n\n        if (Stream_GetRemainingLength(s) / sizeof(LICENSE_BLOB) < scopeCount)\n                return FALSE;  /* Avoid overflow in malloc */\n\n\tscopeList->count = scopeCount;\n\tscopeList->array = (LICENSE_BLOB*) malloc(sizeof(LICENSE_BLOB) * scopeCount);\n\n\t/* ScopeArray */\n\tfor (i = 0; i < scopeCount; i++)\n\t{\n\t\tscopeList->array[i].type = BB_SCOPE_BLOB;\n\n\t\tif (!license_read_binary_blob(s, &scopeList->array[i]))\n\t\t\treturn FALSE;\n\t}\n\n\treturn TRUE;\n}",
+    "variable_definitions": {
+      "s": "wStream* s"
+    },
+    "variable_types": {
+      "s": "struct pointer"
+    },
+    "type_mapping": {
+      "s": "struct pointer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "for-Condition",
+    "line_old": 1934,
+    "line_new": 1934,
+    "critical_vars": [
+      "i"
+    ],
+    "function": "ff_set_cmp",
+    "filename": "FFmpeg/CVE-2013-7010/CVE-2013-7010_CWE-189_454a11a1c9c686c78aa97954306fb63453299760_dsputil.c.diff",
+    "label": "False",
+    "function_code": "\nvoid ff_set_cmp(DSPContext* c, me_cmp_func *cmp, int type){\n    int i;\n\n    memset(cmp, 0, sizeof(void*)*6);\n\n    for(i=0; i<6; i++){\n        switch(type&0xFF){\n        case FF_CMP_SAD:\n            cmp[i]= c->sad[i];\n            break;\n        case FF_CMP_SATD:\n            cmp[i]= c->hadamard8_diff[i];\n            break;\n        case FF_CMP_SSE:\n            cmp[i]= c->sse[i];\n            break;\n        case FF_CMP_DCT:\n            cmp[i]= c->dct_sad[i];\n            break;\n        case FF_CMP_DCT264:\n            cmp[i]= c->dct264_sad[i];\n            break;\n        case FF_CMP_DCTMAX:\n            cmp[i]= c->dct_max[i];\n            break;\n        case FF_CMP_PSNR:\n            cmp[i]= c->quant_psnr[i];\n            break;\n        case FF_CMP_BIT:\n            cmp[i]= c->bit[i];\n            break;\n        case FF_CMP_RD:\n            cmp[i]= c->rd[i];\n            break;\n        case FF_CMP_VSAD:\n            cmp[i]= c->vsad[i];\n            break;\n        case FF_CMP_VSSE:\n            cmp[i]= c->vsse[i];\n            break;\n        case FF_CMP_ZERO:\n            cmp[i]= zero_cmp;\n            break;\n        case FF_CMP_NSSE:\n            cmp[i]= c->nsse[i];\n            break;\n#if CONFIG_DWT\n        case FF_CMP_W53:\n            cmp[i]= c->w53[i];\n            break;\n        case FF_CMP_W97:\n            cmp[i]= c->w97[i];\n            break;\n#endif\n        default:\n            av_log(NULL, AV_LOG_ERROR,\"internal error in cmp function selection\\n\");\n        }\n    }\n}",
+    "variable_definitions": {
+      "i": "int i;"
+    },
+    "variable_types": {
+      "i": "integer"
+    },
+    "type_mapping": {
+      "i": "Integer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "for-Condition",
+    "line_old": 1959,
+    "line_new": 1959,
+    "critical_vars": [
+      "i"
+    ],
+    "function": "diff_bytes_c",
+    "filename": "FFmpeg/CVE-2013-7010/CVE-2013-7010_CWE-189_454a11a1c9c686c78aa97954306fb63453299760_dsputil.c.diff",
+    "label": "False",
+    "function_code": "\nstatic void diff_bytes_c(uint8_t *dst, const uint8_t *src1, const uint8_t *src2, int w){\n    long i;\n#if !HAVE_FAST_UNALIGNED\n    if((long)src2 & (sizeof(long)-1)){\n        for(i=0; i+7<w; i+=8){\n            dst[i+0] = src1[i+0]-src2[i+0];\n            dst[i+1] = src1[i+1]-src2[i+1];\n            dst[i+2] = src1[i+2]-src2[i+2];\n            dst[i+3] = src1[i+3]-src2[i+3];\n            dst[i+4] = src1[i+4]-src2[i+4];\n            dst[i+5] = src1[i+5]-src2[i+5];\n            dst[i+6] = src1[i+6]-src2[i+6];\n            dst[i+7] = src1[i+7]-src2[i+7];\n        }\n    }else\n#endif\n    for(i=0; i<=w-(int)sizeof(long); i+=sizeof(long)){\n        long a = *(long*)(src1+i);\n        long b = *(long*)(src2+i);\n        *(long*)(dst+i) = ((a|pb_80) - (b&pb_7f)) ^ ((a^b^pb_80)&pb_80);\n    }\n    for(; i<w; i++)\n        dst[i+0] = src1[i+0]-src2[i+0];\n}",
+    "variable_definitions": {
+      "i": "long i;"
+    },
+    "variable_types": {
+      "i": "integer"
+    },
+    "type_mapping": {
+      "i": "Integer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 456,
+    "line_new": 456,
+    "critical_vars": [
+      "c->tile_stride"
+    ],
+    "function": "g2m_init_buffers",
+    "filename": "FFmpeg/CVE-2013-7013/CVE-2013-7013_CWE-189_821a5938d100458f4d09d634041b05c860554ce0_g2meet.c.diff",
+    "label": "False",
+    "function_code": "\nstatic int g2m_init_buffers(G2MContext *c)\n{\n    int aligned_height;\n\n    if (!c->framebuf || c->old_width < c->width || c->old_height < c->height) {\n        c->framebuf_stride = FFALIGN(c->width * 3, 16);\n        aligned_height     = FFALIGN(c->height,    16);\n        av_free(c->framebuf);\n        c->framebuf = av_mallocz(c->framebuf_stride * aligned_height);\n        if (!c->framebuf)\n            return AVERROR(ENOMEM);\n    }\n    if (!c->synth_tile || !c->jpeg_tile ||\n        c->old_tile_w < c->tile_width ||\n        c->old_tile_h < c->tile_height) {\n        c->tile_stride = FFALIGN(c->tile_width, 16) * 3;\n        aligned_height = FFALIGN(c->tile_height,    16);\n        av_free(c->synth_tile);\n        av_free(c->jpeg_tile);\n        av_free(c->kempf_buf);\n        av_free(c->kempf_flags);\n        c->synth_tile  = av_mallocz(c->tile_stride      * aligned_height);\n        c->jpeg_tile   = av_mallocz(c->tile_stride      * aligned_height);\n        c->kempf_buf   = av_mallocz((c->tile_width + 1) * aligned_height\n                                    + FF_INPUT_BUFFER_PADDING_SIZE);\n        c->kempf_flags = av_mallocz( c->tile_width      * aligned_height);\n        if (!c->synth_tile || !c->jpeg_tile ||\n            !c->kempf_buf || !c->kempf_flags)\n            return AVERROR(ENOMEM);\n    }\n\n    return 0;\n}",
+    "variable_definitions": {
+      "c->tile_stride": "Definition not found"
+    },
+    "variable_types": {
+      "c->tile_stride": "struct pointer_integer"
+    },
+    "type_mapping": {
+      "c->tile_stride": "sp_integer"
+    }
+  },
+  {
+    "patch_model": "Delete",
+    "change_type": "Fun-Call",
+    "line_old": 307,
+    "critical_vars": [
+      "lsr->bs",
+      "len"
+    ],
+    "function": "lsr_read_extension",
+    "filename": "gpac/CVE-2022-4202/CVE-2022-4202_CWE-189_b3d821c4ae9ba62b3a194d9dcb5e99f17bd56908_lsr_dec.c.diff",
+    "label": "True",
+    "function_code": "\nstatic void lsr_read_extension(GF_LASeRCodec *lsr, const char *name)\n{\n\tu32 len = lsr_read_vluimsbf5(lsr, name);\n#if 0\n\t*out_data = gf_malloc(sizeof(char)*len);\n\tgf_bs_read_data(lsr->bs, *out_data, len);\n\t*out_len = len;\n#else\n\twhile (len && gf_bs_available(lsr->bs) ) {\n\t\tgf_bs_read_int(lsr->bs, 8);\n\t\tlen--;\n\t}\n\tif (len) lsr->last_error = GF_NON_COMPLIANT_BITSTREAM;\n#endif\n}",
+    "variable_definitions": {
+      "lsr->bs": "Definition not found",
+      "len": "u32 len = lsr_read_vluimsbf5(lsr, name);"
+    },
+    "variable_types": {
+      "lsr->bs": "struct pointer_struct pointer",
+      "len": "integer"
+    },
+    "type_mapping": {
+      "lsr->bs": "sp_sp",
+      "len": "Integer"
+    }
+  },
+  {
+    "patch_model": "Replace",
+    "change_type": "Assignment",
+    "line_old": 856,
+    "line_new": 867,
+    "critical_vars": [
+      "neg"
+    ],
+    "function": "lsr_translate_coords",
+    "filename": "gpac/CVE-2022-4202/CVE-2022-4202_CWE-189_b3d821c4ae9ba62b3a194d9dcb5e99f17bd56908_lsr_dec.c.diff",
+    "label": "False",
+    "function_code": "\nstatic Fixed lsr_translate_coords(GF_LASeRCodec *lsr, u32 val, u32 nb_bits)\n{\n\tif (!nb_bits) return 0;\n\tif (nb_bits>=32) return 0;\n\n#ifdef GPAC_FIXED_POINT\n\tif (val >> (nb_bits-1) ) {\n\t\ts64 neg = (s64) val - (0x00000001UL << nb_bits);\n\t\tif (neg < -FIX_ONE / 2)\n\t\t\treturn 2 * gf_divfix(INT2FIX(neg/2), lsr->res_factor);\n\t\treturn gf_divfix(INT2FIX(neg), lsr->res_factor);\n\t} else {\n\t\tif (val > FIX_ONE / 2)\n\t\t\treturn 2 * gf_divfix(INT2FIX(val/2), lsr->res_factor);\n\t\treturn gf_divfix(INT2FIX(val), lsr->res_factor);\n\t}\n#else\n\tif (val >> (nb_bits-1) ) {\n\t\ts64 neg = (s64) val - (0x00000001UL << nb_bits);\n\t\treturn ((Fixed)neg) / lsr->res_factor;\n\t} else {\n\t\treturn ((Fixed)val) / lsr->res_factor;\n\t}\n#endif\n}",
+    "variable_definitions": {
+      "neg": "s64 neg = (s64) val - (0x00000001UL << nb_bits);"
+    },
+    "variable_types": {
+      "neg": "integer"
+    },
+    "type_mapping": {
+      "neg": "Integer"
+    }
+  }
+]

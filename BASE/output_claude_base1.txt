@@ -1,0 +1,4 @@
+  File "base1.py", line 36
+    print(f"Failed to load JSON file: {json_file}. Error: {e}")
+                                                             ^
+SyntaxError: invalid syntax
