@@ -90,7 +90,7 @@ class Run():
             if "function_code" not in data:
                 continue
             i=i+1
-            print("第{}条".format(i))
+            print("Entry {}".format(i))
             key_variable=list(data['type_mapping'].keys())
             code=data['function_code']
             variable_type1=list(data['type_mapping'].values())
@@ -118,7 +118,6 @@ class Run():
                 '''
                 """
 
-                # 生成推理说明
                 direct_desc = ", ".join(direct_list)
                 indirect_desc = ", ".join(indirect_list)
                 vul_types_desc = ", ".join(sorted(vul))
@@ -131,8 +130,6 @@ class Run():
                 # else:
                 #     reasoning = f"According to the knowledge graph, {key_variable} may trigger other vulnerabilities."
                 
-
-                # 添加最终提示内容
                 vul_field = "None" if not vul_types_desc else f"None, {vul_types_desc}, others"
                 messages.append({
                     "role": "user",
@@ -159,7 +156,7 @@ class Run():
                     try:
                         R1 = json.loads(matches[0])
                         data['predict']=(json.loads(matches[0])['Vulnerability_Present?'])
-                        print("匹配到漏洞特征，初次判断：{}".format(data['predict']))
+                        print("Matched vulnerability characteristics, initial judgment: {}".format(data['predict']))
                         print(R1)
                         FIX=[]
                         print(R1['Vulnerability_types'])
@@ -197,11 +194,11 @@ class Run():
                             self.chat_with_pirate(messages)
                             response2=messages[-1]['content']
                             data['predict']=response2
-                            print("找到直接和间接修补，二次判断：{}".format(data['predict']))                              
+                            print("Found direct and indirect fixes, second judgment: {}".format(data['predict']))                              
 
                     except json.JSONDecodeError as e:
-                        print(f"JSON 解析错误: {e}")
-                        print(f"原始数据: {response1}")
+                        print(f"JSON parsing error: {e}")
+                        print(f"Original data: {response1}")
                         data['predict']=response1
                         
             else:
