@@ -5,13 +5,11 @@ import logging
 import httpx
 import os
 logging.getLogger("neo4j").setLevel(logging.ERROR)
-http_client = httpx.Client(verify=False)
 class Run():
     def __init__(self):
         self.client = OpenAI(
             base_url="",
             api_key=os.getenv("OPENAI_API_KEY", "your api key"),
-            http_client=http_client,
         )
     
     def save_messages_to_json(self,filename,messages):

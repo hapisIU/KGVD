@@ -3,12 +3,10 @@ from openai import OpenAI, OpenAIError
 import time
 import httpx
 import os
-http_client = httpx.Client(verify=False)
 
 client = OpenAI(
     base_url="",
     api_key=os.getenv("OPENAI_API_KEY", ""),
-    http_client=http_client,
 )
 
 def run_LLM(json_file):
