@@ -72,28 +72,27 @@ def analyze_single_variable(var_name, definition, function_code):
     ### Primary Types:
     - integer (includes: int, int32_t, int64_t, short, long, size_t, uint8, uint16, uint32, uint64, etc.)
     - char (includes: char, unsigned char, uchar, etc.)
-    - float (includes: float, double, long double, etc.)
+    - FLOAT (includes: FLOAT, double, long double, etc.)
 
     ### Secondary Types (must be specified):
-
     **Struct Types:**
     - struct (includes all user-defined types and structs)
 
     **Array Types:**
     - char array
     - integer array
-    - float array
+    - FLOAT array
     - struct array
     - char pointer array
     - integer pointer array
-    - float pointer array
+    - FLOAT pointer array
     - struct pointer array
 
     **Pointer Types:**
     - char pointer
     - struct pointer
     - integer pointer
-    - float pointer
+    - FLOAT pointer
 
     ## Judgment Rules:
     1. Judge types based on the variable definition statement AND code context
@@ -104,7 +103,7 @@ def analyze_single_variable(var_name, definition, function_code):
     6. Pointer arrays must clearly specify the pointed type
     7. uchar, unsigned char are classified as char type
     8. int32_t, int64_t, size_t, short, long, uint8, uint16, uint32, uint64, etc. are all classified as integer type
-    9. float, double, long double are classified as float type
+    9. FLOAT, double, long double are classified as FLOAT type
     10. User-defined types (non-standard types) are classified as struct
     11. Use code context to infer type when definition is not available
     12. If the variable itself is in A->B form, add "struct pointer_" prefix to B's type
@@ -115,158 +114,56 @@ def analyze_single_variable(var_name, definition, function_code):
     17. If the type cannot be determined, output "unknown"
 
     ## Examples:
+        Definition: `int *p;`
+        Type: integer pointer
 
-    Definition: `int *p;`
-    Type: integer pointer
+        Definition: `float arr[10];`
+        Type: FLOAT array
 
-    Definition: `float value;`
-    Type: float
+        Definition: `unsigned char data[256];`
+        Type: char array
 
-    Definition: `double *dptr;`
-    Type: float pointer
+        Definition: `size_t length;`
+        Type: integer
 
-    Definition: `float arr[10];`
-    Type: float array
+        Definition: `MyCustomType obj;`
+        Type: struct
 
-    Definition: `uint8 *cp0;`
-    Type: integer pointer
+        Definition: `struct Node *node;`
+        Type: struct pointer
 
-    Definition: `Definition not found`
-    Code shows: `cp0 = buffer;` (where buffer is char*)
-    Type: char pointer
+        Definition: `char *names[] = {{"Alice", "Bob"}};`
+        Type: char pointer array
 
-    Definition: `Definition not found`
-    Code shows: `count = 10;`
-    Type: integer
+        Definition: `struct Node *nodes[50];`
+        Type: struct pointer array
 
-    Definition: `Definition not found`
-    Code shows: `price = 10.5;`
-    Type: float
+        Definition: `s->s3`  # A->B form
+        Type: struct pointer_struct pointer
 
-    Definition: `Definition not found`
-    Code shows: `data[i] = value;` (array indexing)
-    Type: integer array
+        Definition: `s->s3->rrec`  # A->B->C form
+        Type: struct pointer_struct pointer
 
-    Definition: `uint32_t *ptr;`
-    Type: integer pointer
+        Definition: `data.count`  # A.B form
+        Type: struct.integer
 
-    Definition: `char buffer[100];`
-    Type: char array
+        Definition: `person.address.city`  # A.B.C form
+        Type: struct.integer
 
-    Definition: `unsigned char data[256];`
-    Type: char array
+        Definition: `Definition not found`
+        Code shows: `cp0 = buffer;` (where buffer is char*)
+        Type: char pointer
 
-    Definition: `int32_t count;`
-    Type: integer
+        Definition: `Definition not found`
+        Code shows: `count = 10;`
+        Type: integer
 
-    Definition: `uint8 byte;`
-    Type: integer
+        Definition: `Definition not found`
+        Code shows: `data[i] = value;`
+        Type: integer array
 
-    Definition: `struct Node {{ int data; char name[20]; }} node;`
-    Type: struct
-
-    Definition: `struct Node *node;`
-    Type: struct pointer
-
-    Definition: `struct Student students[50];`
-    Type: struct array
-
-    Definition: `int arr[10][20];`
-    Type: integer array
-
-    Definition: `char **argv;`
-    Type: char pointer
-
-    Definition: `int num;`
-    Type: integer
-
-    Definition: `uchar byte;`
-    Type: char
-
-    Definition: `size_t length;`
-    Type: integer
-
-    Definition: `struct Data {{ char *ptr; int count; }} data;`
-    Type: struct
-
-    Definition: `MyCustomType obj;`
-    Type: struct
-
-    Definition: `CustomStruct *ptr;`
-    Type: struct pointer
-
-    Definition: `char *names[] = {{"Alice", "Bob"}};`
-    Type: char pointer array
-
-    Definition: `int *arr[10];`
-    Type: integer pointer array
-
-    Definition: `struct Node *nodes[50];`
-    Type: struct pointer array
-
-    Definition: `unsigned char *pixels;`
-    Type: char pointer
-
-    Definition: `int32_t *values;`
-    Type: integer pointer
-
-    Definition: `uint8 *data_ptr;`
-    Type: integer pointer
-
-    Definition: `s->s3`  # A->B form, variable is s3
-    Type: struct pointer_struct pointer
-
-    Definition: `image->comps`  # A->B form, variable is comps
-    Type: struct pointer_struct pointer
-
-    Definition: `conn->socket`  # A->B form, variable is socket
-    Type: struct pointer_struct pointer
-
-    Definition: `s->s3->rrec`  # A->B->C form, variable is s3
-    Type: struct pointer_struct pointer
-
-    Definition: `session->user->profile`  # A->B->C form, variable is user
-    Type: struct pointer_struct pointer
-
-    Definition: `data.count`  # A.B form, variable is count
-    Type: struct.integer
-
-    Definition: `student.age`  # A.B form, variable is age
-    Type: struct.integer
-
-    Definition: `config.enabled`  # A.B form, variable is enabled
-    Type: struct.integer
-
-    Definition: `person.address.city`  # A.B.C form, variable is address
-    Type: struct.integer
-
-    Definition: `company.employee.salary`  # A.B.C form, variable is employee
-    Type: struct.integer
-
-    Definition: `unknown_type var;`
-    Type: unknown
-
-    Definition: `custom_type data;`
-    Type: struct
-
-    Definition: `void *ptr;`
-    Type: unknown
-
-    ## Special Case Handling:
-    - All struct types and user-defined types uniformly use "struct"
-    - Pointer arrays must clearly specify the pointed type
-    - Multi-dimensional arrays are uniformly identified as array types
-    - uchar/unsigned char are classified as char
-    - Various integer type aliases (int32_t, uint8, uint16, uint32, uint64, size_t, etc.) are classified as integer
-    - float, double, long double are classified as float
-    - User-defined types (non-standard types) are classified as struct
-    - When definition is "Definition not found", infer type from code usage patterns
-    - Look for array indexing ([]), pointer dereferencing (->), function calls to infer type
-    - If the variable itself is in A->B form, add "struct pointer_" prefix to B's type
-    - If the variable itself is in A->B->C form, only judge B and add "struct pointer_" prefix
-    - If the variable itself is in A.B form, add "struct." prefix to B's type
-    - If the variable itself is in A.B.C form, only judge B and add "struct." prefix
-    - If type cannot be determined from the definition and context, output "unknown"
+        Definition: `void *ptr;`
+        Type: unknown
 
     ## Output Requirements:
     - Output only the type name, no explanations
